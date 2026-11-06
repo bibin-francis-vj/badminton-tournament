@@ -50,7 +50,7 @@ src/
 ├── utils/supabaseStorage.ts   # Supabase reads/writes
 ├── utils/calculations.ts      # Team stats and rankings
 ├── hooks/useRealtimeSubscriptions.ts
-├── lib/supabase.ts            # Supabase client (reads VITE_SUPABASE_* env vars)
+├── lib/supabase.ts            # Supabase client (reads SUPABASE_URL / SUPABASE_ANON_KEY)
 └── types/index.ts
 database-migrations/           # SQL: full schema + upgrade script for older databases
 docs/                          # SETUP.md, USER-GUIDE.md

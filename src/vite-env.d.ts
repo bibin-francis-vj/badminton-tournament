@@ -1,10 +1,12 @@
 /// <reference types="vite/client" />
 
+// Exposed to the app by vite.config.ts (CLIENT_ENV); set them in .env or the hosting provider
 interface ImportMetaEnv {
-  readonly VITE_SUPABASE_URL: string
-  readonly VITE_SUPABASE_ANON_KEY: string
-  readonly VITE_ADMIN_USERNAME: string
-  readonly VITE_ADMIN_PASSWORD: string
+  readonly SUPABASE_URL: string
+  readonly SUPABASE_ANON_KEY: string
+  readonly ADMIN_USERNAME: string
+  readonly ADMIN_PASSWORD: string
+  readonly RESET_PASSWORD: string
 }
 
 interface ImportMeta {

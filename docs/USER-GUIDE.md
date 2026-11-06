@@ -66,7 +66,7 @@ An admin can override the table in **Stats → Edit** (positions, W, L, Sets ±,
 
 ## Resetting
 
-Tap **Reset** in the admin dashboard header and pick one of two options. Both ask for the reset password (`VITE_RESET_PASSWORD`) and can't be undone.
+Tap **Reset** in the admin dashboard header and pick one of two options. Both ask for the reset password (`RESET_PASSWORD`) and can't be undone.
 
 - **Reset scores only**: every match goes back to *upcoming* at 0–0 (sets, undo history, winners and pending approvals are cleared), and team stats, manual positions and edited numbers go back to zero. **Groups, pools, teams, matches (with their court and queue order), courts and referees are kept.** Use this to replay the same fixture, e.g. after a test run.
 - **Reset everything**: deletes all teams, groups, pools, courts, matches and referee accounts, leaving an empty app. You also have to type `RESET`. To load the Season 2 fixture again afterwards, run `database-migrations/02-seed-cubet-season-2.sql`.

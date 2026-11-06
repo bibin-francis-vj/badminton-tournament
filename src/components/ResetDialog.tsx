@@ -29,7 +29,7 @@ export const ResetDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const resetPassword = import.meta.env.VITE_RESET_PASSWORD;
+  const resetPassword = import.meta.env.RESET_PASSWORD;
   const needsTyping = mode === 'everything';
   const canSubmit = !!password && (!needsTyping || confirmText.trim().toUpperCase() === 'RESET');
 
@@ -38,7 +38,7 @@ export const ResetDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     if (!mode) return;
     setError('');
     if (!resetPassword) {
-      setError('Reset is disabled: VITE_RESET_PASSWORD is not configured.');
+      setError('Reset is disabled: RESET_PASSWORD is not configured.');
       return;
     }
     if (password !== resetPassword) {

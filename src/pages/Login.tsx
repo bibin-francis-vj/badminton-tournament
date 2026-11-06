@@ -32,7 +32,7 @@ export default function Login() {
 
     try {
       if (role === 'admin') {
-        if (username === import.meta.env.VITE_ADMIN_USERNAME && password === import.meta.env.VITE_ADMIN_PASSWORD) {
+        if (username === import.meta.env.ADMIN_USERNAME && password === import.meta.env.ADMIN_PASSWORD) {
           sessionStorage.setItem('isAuthenticated', 'true');
           navigate('/dashboard');
           return;
