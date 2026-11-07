@@ -169,7 +169,14 @@ export const getReferees = async (): Promise<Referee[]> => {
 };
 
 export const saveReferee = async (referee: Referee): Promise<void> => {
-  const { error } = await supabase.from('referees').upsert(referee);
+  // Send only real columns; courtId must be null (not undefined) so unassigning is saved
+  const { error } = await supabase.from('referees').upsert({
+    id: referee.id,
+    name: referee.name,
+    username: referee.username,
+    password: referee.password,
+    courtId: referee.courtId || null
+  });
   if (error) throw error;
 };
 

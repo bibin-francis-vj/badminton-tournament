@@ -135,7 +135,7 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
     return (
       <div
         key={`${end}-${rightCourt}`}
-        className={`absolute flex flex-col items-center justify-center p-1 transition-all ${
+        className={`absolute flex flex-col items-center justify-center p-1 ${
           isServer ? 'bg-lime-300/35 ring-2 ring-inset ring-lime-300' : isReceiver ? 'bg-white/10 ring-2 ring-inset ring-white/70' : ''
         }`}
         style={boxStyle(end, half)}

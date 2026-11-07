@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
 import { getStandings, standingIdOf, matchLabel, sortStanding, standingHasPoolMatches, sortGroups, sortByName, setDiffOf, pointDiffOf, signed } from '../utils/calculations';
 import type { Court, Match, Standing, Team } from '../types';
@@ -204,8 +204,86 @@ const StandingTable: React.FC<{ standing: Standing; teams: Team[]; qualifiers: n
   </div>
 );
 
+const RANKING_STEPS: { title: string; text: string }[] = [
+  { title: 'Most wins', text: 'More wins = higher place.' },
+  { title: 'Same wins?', text: 'The team that beat the other goes higher.' },
+  { title: 'Still level?', text: 'Better Sets, then better Pts.' }
+];
+
+/** Bottom sheet (dialog on larger screens) explaining how the standings are ranked. */
+const RankingInfoSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-[2px] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ranking-info-title"
+        className="w-full sm:max-w-md max-h-[85vh] overflow-y-auto rounded-3xl sm:rounded-2xl bg-white shadow-2xl p-5 sm:p-6 animate-fade-up"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-slate-200 sm:hidden" aria-hidden="true" />
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="ranking-info-title" className="text-lg font-bold text-slate-900">How the standings work</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="p-1.5 -m-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <ol className="mt-4 space-y-3">
+          {RANKING_STEPS.map((step, i) => (
+            <li key={step.title} className="flex gap-3">
+              <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                {i + 1}
+              </span>
+              <div className="text-sm">
+                <p className="font-semibold text-slate-900">{step.title}</p>
+                <p className="text-slate-600 mt-0.5">{step.text}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="mt-5 rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm text-slate-600 space-y-1">
+          <p><b>P</b> played · <b>W</b> won · <b>L</b> lost</p>
+          <p><b>Sets</b> sets won minus sets lost</p>
+          <p><b>Pts</b> points won minus points lost</p>
+        </div>
+
+        <div className="mt-3 rounded-xl bg-indigo-50 border border-indigo-100 p-3 text-sm text-slate-700">
+          <p className="font-semibold text-slate-900">Example</p>
+          <p className="mt-1">Team A beats Team B <b>21–15, 21–18</b></p>
+          <p className="mt-1">Team A: Sets <b className="text-green-700">+2</b>, Pts <b className="text-green-700">+9</b> (6 + 3)</p>
+          <p>Team B: Sets <b className="text-red-600">−2</b>, Pts <b className="text-red-600">−9</b></p>
+        </div>
+
+        <p className="mt-3 text-sm text-slate-600">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-lime-300 mr-1.5 align-middle" />
+          Top 2 of each pool go to the semi-finals.
+        </p>
+
+        <button onClick={onClose} className="mt-5 w-full rounded-xl bg-slate-900 py-3 font-semibold text-white hover:bg-slate-800 transition">
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const StandingsTab: React.FC<{ groupFilter: string }> = ({ groupFilter }) => {
   const { groups, pools, teams, matches } = useTournamentStore();
+  const [showInfo, setShowInfo] = useState(false);
   const standings = getStandings(groups, pools).filter(
     s => (groupFilter === 'all' || s.groupId === groupFilter) && standingHasPoolMatches(s.id, matches)
   );
@@ -216,10 +294,20 @@ const StandingsTab: React.FC<{ groupFilter: string }> = ({ groupFilter }) => {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-slate-500 flex items-center gap-2">
-        <span className="inline-block w-3 h-3 rounded-sm bg-lime-300 flex-shrink-0" />
-        Top two of each pool reach the semi-finals · Ranked by wins, then head-to-head, set difference (Sets) and point difference (Pts)
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-slate-500 flex items-center gap-2">
+          <span className="inline-block w-3 h-3 rounded-sm bg-lime-300 flex-shrink-0" />
+          Top two of each pool reach the semi-finals
+        </p>
+        <button
+          onClick={() => setShowInfo(true)}
+          className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-full bg-white ring-1 ring-slate-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition"
+        >
+          <Info className="w-3.5 h-3.5" />
+          How it's ranked
+        </button>
+      </div>
+      {showInfo && <RankingInfoSheet onClose={() => setShowInfo(false)} />}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {standings.map(standing => (
           <StandingTable

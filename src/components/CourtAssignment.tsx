@@ -84,17 +84,17 @@ export const CourtAssignment: React.FC = () => {
   };
 
   const handleAssignReferee = async (courtId: string, refereeId: string) => {
-    if (!refereeId) {
-      return;
-    }
-
-    const referee = referees.find(r => r.id === refereeId);
     const court = courts.find(c => c.id === courtId);
-
-    if (referee && court) {
-      if (await confirmDialog({ title: 'Assign referee?', message: `${referee.name} will referee ${court.name}.`, confirmText: 'Assign' })) {
-        assignRefereeToCourt(refereeId, courtId);
-      }
+    if (!court) return;
+    const referee = referees.find(r => r.id === refereeId);
+    const confirmed = referee
+      ? await confirmDialog({ title: 'Assign referee?', message: `${referee.name} will referee ${court.name}.`, confirmText: 'Assign' })
+      : await confirmDialog({ title: 'Remove referee?', message: `${court.refereeName} will be unassigned from ${court.name}.`, confirmText: 'Remove', tone: 'warning' });
+    if (!confirmed) return;
+    try {
+      await assignRefereeToCourt(referee ? referee.id : null, courtId);
+    } catch (error) {
+      notifyError(error, 'Could not assign the referee. Please try again.');
     }
   };
 
@@ -218,7 +218,7 @@ export const CourtAssignment: React.FC = () => {
                 onChange={(e) => handleAssignReferee(court.id, e.target.value)}
                 className="w-full px-3 py-2.5 md:px-2 md:py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">Select Referee</option>
+                <option value="">{court.refereeId ? 'No referee (unassign)' : 'Select referee'}</option>
                 {referees.map(referee => {
                   // Check if referee is already assigned to a different court
                   const isAssignedElsewhere = !!(referee.courtId && referee.courtId !== court.id);

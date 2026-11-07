@@ -56,7 +56,8 @@ interface TournamentState {
   addReferee: (referee: Referee) => Promise<void>;
   updateReferee: (refereeId: string, updates: Partial<Referee>) => Promise<void>;
   deleteReferee: (refereeId: string) => Promise<void>;
-  assignRefereeToCourt: (refereeId: string, courtId: string) => Promise<void>;
+  /** Put a referee on a court, or clear the court with refereeId null. Throws on failure. */
+  assignRefereeToCourt: (refereeId: string | null, courtId: string) => Promise<void>;
 
   // Standings (admin edits; throw on failure)
   /** Save a pool table: entries in display order with their stats (null = use computed). manualOrder pins the order. */
@@ -140,6 +141,83 @@ const withComputedStats = (teams: Team[], matches: Match[]): Team[] =>
     return { ...team, computedStats: computed.stats, stats: withOverride(computed.stats, team.statsOverride) };
   });
 
+/**
+ * A court's referee is whoever has referee.courtId === court.id (the single source of truth, also used by the
+ * referee panel). The courts.refereeId / refereeName columns are kept in sync on writes but never trusted on read.
+ */
+const courtReferee = (courtId: string, referees: Referee[]) => {
+  const referee = referees.find(r => r.courtId === courtId);
+  return { refereeId: referee?.id ?? '', refereeName: referee?.name ?? 'Unassigned' };
+};
+
+/**
+ * Put a referee on a court (or none, with refereeId null): any other referee on that court is unassigned,
+ * the referee leaves their previous court, and the affected courts' refereeId / refereeName columns are updated.
+ */
+const setCourtReferee = async (courtId: string, refereeId: string | null, referees: Referee[], courts: Court[]) => {
+  const touchedCourts: string[] = [courtId];
+  for (const r of referees) {
+    const isTarget = r.id === refereeId;
+    if (!isTarget && r.courtId === courtId) {
+      await supabaseStorage.saveReferee({ ...r, courtId: undefined });
+    }
+    if (isTarget && r.courtId !== courtId) {
+      if (r.courtId && !touchedCourts.includes(r.courtId)) touchedCourts.push(r.courtId);
+      await supabaseStorage.saveReferee({ ...r, courtId });
+    }
+  }
+  const assigned = referees.find(r => r.id === refereeId);
+  for (const id of touchedCourts) {
+    const court = courts.find(c => c.id === id);
+    if (!court) continue;
+    const onCourt = id === courtId ? assigned : undefined;
+    await supabaseStorage.saveCourt({ ...court, refereeId: onCourt?.id ?? '', refereeName: onCourt?.name ?? 'Unassigned' });
+  }
+};
+
+/*
+ * Instant (optimistic) match updates for live scoring.
+ * The new match is shown on screen straight away and saved in the background, one save at a time and in order.
+ * While saves are pending, data loaded from the server is ignored (it may be older than what is on screen);
+ * once the last save finishes, everything is reloaded from the server.
+ */
+let pendingWrites = 0;
+let writeSeq = 0;
+let writeChain: Promise<unknown> = Promise.resolve();
+
+type StoreSet = (fn: (state: TournamentState) => Partial<TournamentState>) => void;
+
+/** Put an updated match into the store (matches list and the courts that show it) without a server round trip. */
+const applyMatchLocally = (set: StoreSet, updated: Match) =>
+  set(state => ({
+    matches: state.matches.map(m => (m.id === updated.id ? updated : m)),
+    courts: state.courts.map(c => ({
+      ...c,
+      matches: c.matches?.map(m => (m.id === updated.id ? updated : m)),
+      match: c.match?.id === updated.id ? updated : c.match
+    }))
+  }));
+
+/** Show the match now, save it in the background. Rejects if the save fails (the screen is then reloaded from the server). */
+const saveMatchOptimistic = (set: StoreSet, refresh: () => Promise<void>, updated: Match): Promise<void> => {
+  applyMatchLocally(set, updated);
+  pendingWrites++;
+  writeSeq++;
+  const save = writeChain.then(() => supabaseStorage.saveMatch(updated));
+  writeChain = save.catch(() => undefined);
+  return save.then(
+    () => {
+      pendingWrites--;
+      if (pendingWrites === 0) void refresh();
+    },
+    error => {
+      pendingWrites--;
+      if (pendingWrites === 0) void refresh();
+      throw error;
+    }
+  );
+};
+
 export const useTournamentStore = create<TournamentState>((set, get) => ({
   teams: [],
   matches: [],
@@ -168,7 +246,8 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
         matches: matches
           .filter(m => m.courtId === court.id && (m.status === 'upcoming' || m.status === 'live'))
           .sort((a, b) => (a.queueOrder ?? 999) - (b.queueOrder ?? 999)),
-        match: matches.find(m => m.courtId === court.id && m.status === 'live')
+        match: matches.find(m => m.courtId === court.id && m.status === 'live'),
+        ...courtReferee(court.id, referees)
       }));
 
       set({ teams: withComputedStats(teams, matches), matches, courts: courtsWithMatches, referees, groups, pools, isLoading: false, isInitialized: true });
@@ -179,6 +258,7 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
   },
 
   refreshData: async () => {
+    const seq = writeSeq;
     try {
       const [teams, matches, courts, referees, groups, pools] = await Promise.all([
         supabaseStorage.getTeams(),
@@ -191,12 +271,17 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
 
 
       // Populate courts with their assigned matches
+      // A score was entered while this was loading: this data may be older than the screen, so drop it
+      // (a fresh reload runs when the pending saves finish).
+      if (pendingWrites > 0 || seq !== writeSeq) return;
+
       const courtsWithMatches = courts.map(court => ({
         ...court,
         matches: matches
           .filter(m => m.courtId === court.id && (m.status === 'upcoming' || m.status === 'live'))
           .sort((a, b) => (a.queueOrder ?? 999) - (b.queueOrder ?? 999)),
-        match: matches.find(m => m.courtId === court.id && m.status === 'live')
+        match: matches.find(m => m.courtId === court.id && m.status === 'live'),
+        ...courtReferee(court.id, referees)
       }));
 
       set({ teams: withComputedStats(teams, matches), matches, courts: courtsWithMatches, referees, groups, pools });
@@ -441,12 +526,11 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
         newSets[currentSetIndex] = currentSet;
       }
       updatedMatch.sets = newSets;
-      
-      await supabaseStorage.saveMatch(updatedMatch);
-      
-      await get().refreshData();
+
+      await saveMatchOptimistic(set, get().refreshData, updatedMatch);
     } catch (error) {
       console.error('Error updating match score:', error);
+      throw error;
     }
   },
 
@@ -645,12 +729,9 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
         servingTeam: restoredServingTeam
       };
 
-      // Save to database (this is the only database operation needed)
-      await supabaseStorage.saveMatch(updatedMatch);
-      
-      // Refresh data to update UI
-      await get().refreshData();
-      
+      // Show it now, save in the background
+      await saveMatchOptimistic(set, get().refreshData, updatedMatch);
+
     } catch (error) {
       console.error('[UNDO] Error undoing last score:', error);
       throw error;
@@ -678,7 +759,10 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
 
   addReferee: async (referee) => {
     try {
-      await supabaseStorage.saveReferee(referee);
+      await supabaseStorage.saveReferee({ ...referee, courtId: undefined });
+      if (referee.courtId) {
+        await setCourtReferee(referee.courtId, referee.id, [...get().referees, { ...referee, courtId: undefined }], get().courts);
+      }
       await get().refreshData();
     } catch (error) {
       console.error('Error adding referee:', error);
@@ -691,7 +775,16 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
       if (!referee) return;
 
       const updatedReferee = { ...referee, ...updates };
-      await supabaseStorage.saveReferee(updatedReferee);
+      // Save the details, then move the court assignment through setCourtReferee so courts stay exclusive
+      await supabaseStorage.saveReferee({ ...updatedReferee, courtId: referee.courtId });
+      if (updatedReferee.courtId !== referee.courtId) {
+        const others = get().referees.map(r => (r.id === refereeId ? { ...updatedReferee, courtId: referee.courtId } : r));
+        if (updatedReferee.courtId) {
+          await setCourtReferee(updatedReferee.courtId, refereeId, others, get().courts);
+        } else if (referee.courtId) {
+          await setCourtReferee(referee.courtId, null, others, get().courts);
+        }
+      }
       await get().refreshData();
     } catch (error) {
       console.error('Error updating referee:', error);
@@ -708,17 +801,10 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
   },
 
   assignRefereeToCourt: async (refereeId, courtId) => {
-    try {
-      const referee = get().referees.find(r => r.id === refereeId);
-      const court = get().courts.find(c => c.id === courtId);
-      
-      if (!referee || !court) return;
-
-      await supabaseStorage.saveCourt({ ...court, refereeId, refereeName: referee.name });
-      await get().refreshData();
-    } catch (error) {
-      console.error('Error assigning referee to court:', error);
-    }
+    if (refereeId && !get().referees.some(r => r.id === refereeId)) throw new Error('Referee not found');
+    if (!get().courts.some(c => c.id === courtId)) throw new Error('Court not found');
+    await setCourtReferee(courtId, refereeId, get().referees, get().courts);
+    await get().refreshData();
   },
 
   updateStanding: async (standingId, entries, manualOrder) => {
@@ -760,7 +846,7 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
       const other = players.find(p => p.id !== startRight)?.id ?? players[1].id;
       courtPositions = { ...courtPositions, [setKey]: { ...courtPositions[setKey], [swapPlayers]: other } };
     }
-    await supabaseStorage.saveMatch({
+    await saveMatchOptimistic(set, get().refreshData, {
       ...match,
       ...(swapSides
         ? { team1Position: team1Position === 'left' ? 'right' : 'left', team2Position: team1Position }
@@ -768,7 +854,6 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
       ...(servingTeam ? { servingTeam } : {}),
       courtPositions
     });
-    await get().refreshData();
   },
 
   setMatchResult: async (matchId, setScores, winnerKey) => {

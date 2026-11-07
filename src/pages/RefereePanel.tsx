@@ -10,10 +10,9 @@ import { RefereeCourt } from '../components/RefereeCourt';
 
 export const RefereePanel: React.FC = () => {
   const navigate = useNavigate();
-  const { courts, matches, groups, pools, updateMatchScore, startMatch, finishMatch, undoLastScore, endSet, isLoading, isInitialized } = useTournamentStore();
+  const { courts, matches, referees, groups, pools, updateMatchScore, startMatch, finishMatch, undoLastScore, endSet, isLoading, isInitialized } = useTournamentStore();
   const [refereeName, setRefereeName] = useState('');
   const [courtId, setCourtId] = useState('');
-  const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
   const [assignedCourt, setAssignedCourt] = useState<Court | null>(null);
   const [assignedMatches, setAssignedMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,6 +34,17 @@ export const RefereePanel: React.FC = () => {
     if (storedCourtId) setCourtId(storedCourtId);
   }, [navigate]);
 
+  // Follow the referee's current court from the database (the admin may reassign it after sign-in)
+  useEffect(() => {
+    const refereeId = sessionStorage.getItem('refereeId');
+    const me = referees.find(r => r.id === refereeId);
+    if (me) {
+      const current = me.courtId ?? '';
+      setCourtId(current);
+      sessionStorage.setItem('refereeCourtId', current);
+    }
+  }, [referees]);
+
   useEffect(() => {
     if (courtId) {
       // Find assigned court
@@ -47,11 +57,11 @@ export const RefereePanel: React.FC = () => {
       );
       setAssignedMatches(courtMatches);
 
-      // Find current LIVE match on this court
-      const liveMatch = matches.find(m => m.courtId === courtId && m.status === 'live');
-      setCurrentMatch(liveMatch || null);
     }
   }, [courtId, courts, matches]);
+
+  // The live match on this court, read straight from the store so score and court update in the same render
+  const currentMatch = courtId ? matches.find(m => m.courtId === courtId && m.status === 'live') ?? null : null;
 
   const handleLogout = () => {
     sessionStorage.removeItem('refereeAuthenticated');
@@ -61,13 +71,13 @@ export const RefereePanel: React.FC = () => {
     navigate('/login?role=referee');
   };
 
+  // Scores show instantly and save in the background, so the buttons are never blocked
   const handleScoreUpdate = async (team: 'team1' | 'team2') => {
     if (currentMatch && currentMatch.status === 'live') {
-      setLoading(true);
       try {
         await updateMatchScore(currentMatch.id, team, 1);
-      } finally {
-        setLoading(false);
+      } catch (error) {
+        notifyError(error, 'Could not save the point. The score has been reloaded, please check it.');
       }
     }
   };
@@ -75,11 +85,10 @@ export const RefereePanel: React.FC = () => {
   const handleUndoScore = async () => {
     if (currentMatch && currentMatch.status === 'live') {
       if (await confirmDialog({ title: 'Undo last point?', message: 'The last point in this set is removed and the serve goes back.', confirmText: 'Undo', tone: 'warning' })) {
-        setLoading(true);
         try {
           await undoLastScore(currentMatch.id);
-        } finally {
-          setLoading(false);
+        } catch (error) {
+          notifyError(error, 'Could not undo the point. The score has been reloaded, please check it.');
         }
       }
     }
