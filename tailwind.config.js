@@ -5,7 +5,12 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      screens: {
+        // Phone turned sideways (short landscape screen)
+        ls: { raw: '(orientation: landscape) and (max-height: 540px)' },
+      },
+    },
   },
   plugins: [],
 }

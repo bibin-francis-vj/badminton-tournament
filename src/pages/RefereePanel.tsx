@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserCheck, LogOut, Trophy, Clock, MapPin, Loader2 } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
 import { LoadingSpinner } from '../components/LoadingSpinner';
-import { matchLabel } from '../utils/calculations';
+import { matchLabel, setRuleFor, setWinnerOf } from '../utils/calculations';
 import type { Match, Court } from '../types';
 import { confirmDialog, notify, notifyError } from '../components/Dialog';
 import { RefereeCourt } from '../components/RefereeCourt';
@@ -62,6 +62,20 @@ export const RefereePanel: React.FC = () => {
 
   // The live match on this court, read straight from the store so score and court update in the same render
   const currentMatch = courtId ? matches.find(m => m.courtId === courtId && m.status === 'live') ?? null : null;
+
+  // When a set is won (e.g. 15-12, 16-14, 21-20 in a pool match), open the End set / End match window by itself.
+  // Asked once per score, so Cancel keeps it closed until the score changes (e.g. after an undo).
+  const promptedFor = useRef('');
+  const liveSet = currentMatch?.sets?.find(s => s.setNumber === currentMatch.currentSetNumber);
+  const liveSetWinner = currentMatch && liveSet && !liveSet.locked ? setWinnerOf(liveSet.score, setRuleFor(currentMatch)) : null;
+  const promptKey = currentMatch && liveSet ? `${currentMatch.id}:${liveSet.setNumber}:${liveSet.score.team1}-${liveSet.score.team2}` : '';
+  useEffect(() => {
+    if (currentMatch?.status === 'live' && liveSetWinner && promptedFor.current !== promptKey) {
+      promptedFor.current = promptKey;
+      setSelectedWinner(liveSetWinner);
+      setShowEndSetModal(true);
+    }
+  }, [currentMatch?.status, liveSetWinner, promptKey]);
 
   const handleLogout = () => {
     sessionStorage.removeItem('refereeAuthenticated');
@@ -136,9 +150,9 @@ export const RefereePanel: React.FC = () => {
       return;
     }
     
-    // Show modal to select winner
+    // Show modal to select winner (pre-selected when the score already decides the set)
     setShowEndSetModal(true);
-    setSelectedWinner(null);
+    setSelectedWinner(liveSetWinner);
   };
 
   const confirmEndSet = async () => {
@@ -248,7 +262,9 @@ export const RefereePanel: React.FC = () => {
             <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6">
               <div className="text-center mb-2">
                 <h3 className="text-sm font-semibold text-gray-600 uppercase">Best of 3 Sets</h3>
-                <div className="text-xs text-gray-500">First to 2 sets wins • Set to 15 points (17 max)</div>
+                <div className="text-xs text-gray-500">
+                  First to 2 sets wins • {setRuleFor(currentMatch).points} points a set, win by 2 (max {setRuleFor(currentMatch).cap})
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
                 <div className="min-w-0">
@@ -286,6 +302,9 @@ export const RefereePanel: React.FC = () => {
               loading={loading}
               disabled={!!currentMatch.sets?.find(s => s.setNumber === currentMatch.currentSetNumber)?.locked}
               onPoint={handleScoreUpdate}
+              onUndo={handleUndoScore}
+              onEndSet={handleEndSet}
+              onFinish={handleFinishMatch}
             />
 
             {/* Match Controls */}
@@ -541,17 +560,23 @@ export const RefereePanel: React.FC = () => {
         })()}
       </div>
 
-      {/* End Set Modal */}
-      {showEndSetModal && currentMatch && (
+      {/* End Set Modal (End match when this set decides the match) */}
+      {showEndSetModal && currentMatch && (() => {
+        const endsMatch = !!selectedWinner && (currentMatch.score?.[selectedWinner] ?? 0) + 1 >= 2;
+        return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
               <Trophy className="w-6 h-6 text-orange-500" />
-              End Set {currentMatch.currentSetNumber}
+              {endsMatch ? 'End match' : `End Set ${currentMatch.currentSetNumber}`}
             </h2>
-            
+
             <p className="text-gray-600 mb-6">
-              Select the winner of this set. The set will be locked and the next set will begin.
+              {endsMatch
+                ? `${currentMatch[selectedWinner!].name} win the match. The result is saved and the match is completed.`
+                : liveSetWinner
+                  ? `${currentMatch[liveSetWinner].name} have won this set. Confirm to lock it and start the next set.`
+                  : 'Select the winner of this set. The set will be locked and the next set will begin.'}
             </p>
 
             {/* Current Score Display */}
@@ -629,12 +654,13 @@ export const RefereePanel: React.FC = () => {
                 className="flex-1 bg-orange-600 text-white py-3 rounded-lg hover:bg-orange-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {loading && <Loader2 className="w-5 h-5 animate-spin" />}
-                Confirm End Set
+                {endsMatch ? 'End Match' : 'Confirm End Set'}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Team, StatsOverride, Match, MatchStage, Court, Referee, Group, Pool, Set, ScoreEvent } from '../types';
 import * as supabaseStorage from '../utils/supabaseStorage';
-import { calculations, getKnockout, standingIdOf, withOverride } from '../utils/calculations';
+import { calculations, getKnockout, setRuleFor, setWinnerOf, standingIdOf, withOverride } from '../utils/calculations';
 
 interface TournamentState {
   teams: Team[];
@@ -493,12 +493,17 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
         console.warn('Cannot score on a locked set');
         return;
       }
+      // The set is already won (e.g. 15-12): no more points until it is ended
+      if (setWinnerOf(currentSet.score, setRuleFor(match))) {
+        console.warn('Set already won');
+        return;
+      }
 
       // Capture serve state BEFORE scoring
       const serveBefore = match.servingTeam;
 
       // Update current set score
-      currentSet.score[team] = currentSet.score[team] + points;
+      currentSet.score = { ...currentSet.score, [team]: currentSet.score[team] + points };
       
       let updatedMatch = { ...match };
       
@@ -536,6 +541,7 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
 
   endSet: async (matchId, winner: 'team1' | 'team2') => {
     try {
+      await writeChain; // let pending point saves finish first
       const match = get().matches.find(m => m.id === matchId);
       if (!match) return;
 
@@ -607,6 +613,7 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
   },
 
   finishMatch: async (matchId) => {
+    await writeChain; // let pending point saves finish first
     const match = get().matches.find(m => m.id === matchId);
     if (!match) return;
     // Throws if the match is tied on sets; callers show the message to the user

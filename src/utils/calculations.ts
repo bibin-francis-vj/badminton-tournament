@@ -99,6 +99,43 @@ export const rightCourtPlayerId = (match: Match, key: 'team1' | 'team2'): string
 
 export const isKnockout = (match: Pick<Match, 'stage'>) => match.stage === 'semifinal' || match.stage === 'final';
 
+/*
+ * Set scoring (BWF rally scoring). A set is won by the first side to `points` with a 2-point lead;
+ * at (cap − 1)-all the next point wins, so no set goes past `cap`.
+ *   Semi-finals & final: 21 points, max 30 (BWF Laws of Badminton).
+ *   Pool matches:        15 points, max 21 (BWF 3 × 15 scoring format).
+ */
+export interface SetRule {
+  points: number;
+  cap: number;
+}
+export const setRuleFor = (match: Pick<Match, 'stage'>): SetRule =>
+  isKnockout(match) ? { points: 21, cap: 30 } : { points: 15, cap: 21 };
+
+type SideKey = 'team1' | 'team2';
+type SetScore = { team1: number; team2: number };
+
+/** The side that has won the set with this score, or null if it is still being played. */
+export const setWinnerOf = (score: SetScore, rule: SetRule): SideKey | null => {
+  for (const [me, them] of [['team1', 'team2'], ['team2', 'team1']] as const) {
+    if (score[me] >= rule.cap) return me;
+    if (score[me] >= rule.points && score[me] - score[them] >= 2) return me;
+  }
+  return null;
+};
+
+/** The side that wins the set if it scores the next point (game point), or null. */
+export const gamePointFor = (score: SetScore, rule: SetRule): SideKey | null => {
+  if (setWinnerOf(score, rule)) return null;
+  if (setWinnerOf({ ...score, team1: score.team1 + 1 }, rule) === 'team1') return 'team1';
+  if (setWinnerOf({ ...score, team2: score.team2 + 1 }, rule) === 'team2') return 'team2';
+  return null;
+};
+
+/** Level at (points − 1) or more: a side needs a 2-point lead (or the cap point) to win. */
+export const isDeuce = (score: SetScore, rule: SetRule) =>
+  !setWinnerOf(score, rule) && score.team1 === score.team2 && score.team1 >= rule.points - 1;
+
 /** Group of a match (both teams are always in the same group). */
 export const matchGroupId = (match: Pick<Match, 'team1'>) => match.team1.groupId;
 
