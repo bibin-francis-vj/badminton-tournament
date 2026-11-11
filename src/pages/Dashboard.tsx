@@ -8,10 +8,11 @@ import { Statistics } from '../components/Statistics';
 import { MatchApprovalPanel } from '../components/MatchApprovalPanel';
 import { GroupManager } from '../components/GroupManager';
 import { ResetDialog } from '../components/ResetDialog';
-import { LayoutDashboard, Users, Calendar, MapPin, UserCheck, BarChart3, RotateCcw, LogOut, CheckSquare, Layers } from 'lucide-react';
+import { PredictionSettings } from '../components/PredictionSettings';
+import { LayoutDashboard, Users, Calendar, MapPin, UserCheck, BarChart3, RotateCcw, LogOut, CheckSquare, Layers, Crown } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
 
-type Tab = 'groups' | 'teams' | 'matches' | 'courts' | 'referees' | 'stats' | 'approvals';
+type Tab = 'groups' | 'teams' | 'matches' | 'courts' | 'referees' | 'stats' | 'approvals' | 'predictions';
 
 export const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('teams');
@@ -29,7 +30,8 @@ export const Dashboard: React.FC = () => {
     { id: 'referees' as Tab, label: 'Referee Management', shortLabel: 'Referees', icon: UserCheck },
     { id: 'courts' as Tab, label: 'Courts', shortLabel: 'Courts', icon: MapPin },
     { id: 'approvals' as Tab, label: 'Match Approvals', shortLabel: 'Approvals', icon: CheckSquare, badge: pendingApprovalsCount },
-    { id: 'stats' as Tab, label: 'Statistics', shortLabel: 'Stats', icon: BarChart3 }
+    { id: 'stats' as Tab, label: 'Statistics', shortLabel: 'Stats', icon: BarChart3 },
+    { id: 'predictions' as Tab, label: 'Predictions', shortLabel: 'Predict', icon: Crown }
   ];
 
   const handleLogout = () => {
@@ -113,11 +115,12 @@ export const Dashboard: React.FC = () => {
         {activeTab === 'referees' && <RefereeManager />}
         {activeTab === 'approvals' && <MatchApprovalPanel />}
         {activeTab === 'stats' && <Statistics />}
+        {activeTab === 'predictions' && <PredictionSettings />}
       </div>
 
       {/* Bottom Navigation (phones) */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] pb-safe">
-        <div className="grid grid-cols-7">
+        <div className="grid grid-cols-8">
           {tabs.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;

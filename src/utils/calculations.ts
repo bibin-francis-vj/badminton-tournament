@@ -109,8 +109,13 @@ export interface SetRule {
   points: number;
   cap: number;
 }
-export const setRuleFor = (match: Pick<Match, 'stage'>): SetRule =>
-  isKnockout(match) ? { points: 21, cap: 30 } : { points: 15, cap: 21 };
+/** Points a set is played to: the admin's choice for the match, else 15 for pool and 21 for knockout matches. */
+export const pointsPerSetOf = (match: Pick<Match, 'stage' | 'pointsPerSet'>): 15 | 21 =>
+  match.pointsPerSet === 15 || match.pointsPerSet === 21 ? match.pointsPerSet : isKnockout(match) ? 21 : 15;
+
+/** 21-point sets cap at 30 (BWF); 15-point sets cap at 21. */
+export const setRuleFor = (match: Pick<Match, 'stage' | 'pointsPerSet'>): SetRule =>
+  pointsPerSetOf(match) === 21 ? { points: 21, cap: 30 } : { points: 15, cap: 21 };
 
 type SideKey = 'team1' | 'team2';
 type SetScore = { team1: number; team2: number };

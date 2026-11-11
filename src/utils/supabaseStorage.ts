@@ -105,6 +105,7 @@ export const saveMatch = async (match: Match): Promise<void> => {
       stage: match.stage ?? 'pool',
       matchName: match.matchName ?? null,
       bracketSlot: match.bracketSlot ?? null,
+      pointsPerSet: match.pointsPerSet ?? null,
       courtPositions: match.courtPositions ?? {},
       history: match.history || [] // Save history array for undo tracking
     };

@@ -52,10 +52,18 @@ body {
   box-sizing: border-box;
 }
 
+/* No sideways scroll. "hidden" on body would turn it into a scroll box and break sticky bars, so body uses "clip". */
+html {
+  overflow-x: hidden;
+}
+
 html,
 body {
-  overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  overflow-x: clip;
 }
 
 /* iOS zooms into inputs with font-size < 16px; keep form fields at 16px on phones */

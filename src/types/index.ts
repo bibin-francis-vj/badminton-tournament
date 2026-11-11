@@ -78,6 +78,7 @@ export interface Match {
   stage?: MatchStage; // Only 'pool' matches count toward standings (default 'pool')
   matchName?: string | null; // e.g. "Semi-final 1", "Final"
   bracketSlot?: number | null; // Semi-final 1 or 2; final = 1
+  pointsPerSet?: 15 | 21 | null; // Set length chosen by the admin; null = 15 for pool, 21 for knockout
   /**
    * Per set number: id of each team's player standing in the RIGHT service court at the start of that set.
    * Current positions are derived from the point history (a team's players swap when it wins a point while serving).

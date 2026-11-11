@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { ArrowLeft, Check, Crown, Loader2, Lock, LogOut, Medal, Sparkles, Timer, Trophy, X } from 'lucide-react';
+import { ArrowLeft, Check, ClipboardPaste, Crown, Loader2, Lock, LogOut, Mail, Medal, Sparkles, Timer, Trophy, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useTournamentStore } from '../store/tournamentStore';
 import { getKnockout, sortByName, sortGroups } from '../utils/calculations';
@@ -11,10 +11,7 @@ import { notifyError } from '../components/Dialog';
 
 /** Points for each correct group-winner pick. */
 export const POINTS_PER_PICK = 10;
-/**
- * When picks close. The database enforces the same time (function public.prediction_deadline());
- * change both together.
- */
+/** Used until the real close time (set by the admin, table prediction_settings) has loaded. */
 const FALLBACK_DEADLINE = '2026-11-11T20:00:00+05:30';
 
 interface Prediction {
@@ -57,17 +54,35 @@ const useSession = () => {
   return { session, ready };
 };
 
-const useDeadline = () => {
+/** Close time and allowed sign-in methods, both set by the admin. */
+const usePredictionSettings = () => {
   const [deadline, setDeadline] = useState(() => new Date(FALLBACK_DEADLINE));
+  const [logins, setLogins] = useState({ google: false, email: false, loaded: false });
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    supabase.rpc('prediction_deadline').then(({ data }) => {
-      if (typeof data === 'string') setDeadline(new Date(data));
-    });
+    const load = () =>
+      supabase
+        .from('prediction_settings')
+        .select('deadline, google_login, email_login')
+        .eq('id', 1)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.deadline) setDeadline(new Date(data.deadline));
+          if (data) setLogins({ google: data.google_login, email: data.email_login, loaded: true });
+        });
+    load();
+    // The admin can change the close time (or close picks now) at any moment
+    const channel = supabase
+      .channel('prediction-settings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'prediction_settings' }, () => load())
+      .subscribe();
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      supabase.removeChannel(channel);
+    };
   }, []);
-  return { deadline, closed: now >= deadline.getTime(), msLeft: Math.max(0, deadline.getTime() - now) };
+  return { deadline, logins, closed: now >= deadline.getTime(), msLeft: Math.max(0, deadline.getTime() - now) };
 };
 
 const usePredictions = () => {
@@ -153,7 +168,7 @@ const GroupPicker: React.FC<{
 }> = ({ group, teams, myPick, winnerId, pickCounts, totalPicks, locked, savingTeam, onPick }) => {
   const result = winnerId && myPick ? (winnerId === myPick ? 'right' : 'wrong') : null;
   return (
-    <section className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
+    <section id={`pick-group-${group.id}`} className="scroll-mt-20 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
         <h2 className="font-black text-slate-900">{group.name}</h2>
         {result === 'right' && (
@@ -217,13 +232,224 @@ const GroupPicker: React.FC<{
 };
 
 /* ---------------------------------------------------------------------------------------------
+ * Cubet email sign-in: email -> 6-digit code (sent by the prediction-email-otp Edge Function)
+ * -------------------------------------------------------------------------------------------*/
+
+const CUBET_EMAIL = /^[a-z0-9._%+-]+@cubettech\.com$/i;
+
+/** Calls the Edge Function; returns its JSON, or throws with its friendly error message. */
+const otpRequest = async (body: Record<string, string>) => {
+  const { data, error } = await supabase.functions.invoke('prediction-email-otp', { body });
+  if (error) {
+    let message = 'Something went wrong. Please try again.';
+    try {
+      const details = await (error as { context?: Response }).context?.json();
+      if (details?.error) message = details.error;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(message);
+  }
+  return data as { ok?: boolean; token_hash?: string; expires_at?: string; same_code?: boolean };
+};
+
+const EmailOtpSignIn: React.FC = () => {
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [step, setStep] = useState<'email' | 'code'>('email');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+  const [notice, setNotice] = useState('');
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const [, setTick] = useState(0);
+
+  // Keep the "works for N minutes" line current
+  useEffect(() => {
+    if (step !== 'code') return;
+    const t = setInterval(() => setTick(x => x + 1), 10_000);
+    return () => clearInterval(t);
+  }, [step]);
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn(s => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
+  const sendCode = async () => {
+    const clean = email.trim().toLowerCase();
+    setError('');
+    if (!CUBET_EMAIL.test(clean)) {
+      setError('Please use your Cubet email (name@cubettech.com).');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await otpRequest({ action: 'send', email: clean });
+      const resend = step === 'code' && clean === email;
+      setEmail(clean);
+      if (!resend) setCode('');
+      setStep('code');
+      setResendIn(60);
+      setExpiresAt(result.expires_at ? new Date(result.expires_at).getTime() : null);
+      setNotice(
+        !resend ? '' : result.same_code ? 'Sent again. It is the same code as before.' : 'Your old code expired, so we sent a new one.'
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyCode = async (value = code) => {
+    setError('');
+    if (value.length !== 6) {
+      setError('Enter the 6-digit code from the email.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { token_hash } = await otpRequest({ action: 'verify', email, code: value });
+      if (!token_hash) throw new Error('Something went wrong. Please try again.');
+      const { error: authError } = await supabase.auth.verifyOtp({ token_hash, type: 'magiclink' });
+      if (authError) throw new Error('Could not sign you in. Please ask for a new code.');
+      // onAuthStateChange picks up the new session
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  const enterCode = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 6);
+    setCode(digits);
+    if (digits.length === 6 && !busy) verifyCode(digits); // sign in as soon as the whole code is in
+  };
+
+  const pasteCode = async () => {
+    try {
+      enterCode(await navigator.clipboard.readText());
+    } catch {
+      setError('Could not paste. Long-press the box and choose Paste.');
+    }
+  };
+
+  const minutesLeft = expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 60_000)) : 10;
+
+  const field =
+    'w-full rounded-xl ring-1 ring-slate-300 px-4 py-3 text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500';
+  const button =
+    'inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-bold text-white shadow-sm hover:bg-indigo-700 active:scale-[0.98] transition disabled:opacity-60';
+
+  return step === 'email' ? (
+    <form
+      onSubmit={e => {
+        e.preventDefault();
+        sendCode();
+      }}
+      className="space-y-2.5 text-left"
+    >
+      <label htmlFor="cubet-email" className="block text-sm font-semibold text-slate-700">
+        Cubet email
+      </label>
+      <input
+        id="cubet-email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+        placeholder="name@cubettech.com"
+        className={field}
+      />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <button type="submit" disabled={busy} className={button}>
+        {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mail className="w-5 h-5" />}
+        Send code
+      </button>
+    </form>
+  ) : (
+    <form
+      onSubmit={e => {
+        e.preventDefault();
+        verifyCode();
+      }}
+      className="space-y-2.5 text-left"
+    >
+      <p className="text-sm text-slate-600">
+        We sent a 6-digit code to <b className="text-slate-900 break-all">{email}</b>.{' '}
+        {minutesLeft === 0 ? (
+          <b className="text-red-600">This code has expired. Tap Resend code to get a new one.</b>
+        ) : (
+          `It works for ${minutesLeft === 1 ? '1 more minute' : `${minutesLeft} more minutes`}.`
+        )}
+      </p>
+      <p className="rounded-lg bg-amber-50 ring-1 ring-amber-200 px-3 py-2 text-xs text-amber-900">
+        Can't find it? Check your <b>Spam</b> or <b>Junk</b> folder. It can take a couple of minutes to arrive.
+      </p>
+      {notice && <p className="text-sm text-green-700">{notice}</p>}
+      <div className="flex items-end justify-between gap-2">
+        <label htmlFor="cubet-code" className="block text-sm font-semibold text-slate-700">
+          Code
+        </label>
+        <button
+          type="button"
+          onClick={pasteCode}
+          className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+        >
+          <ClipboardPaste className="w-4 h-4" /> Paste
+        </button>
+      </div>
+      <input
+        id="cubet-code"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        value={code}
+        onChange={e => enterCode(e.target.value)}
+        placeholder="000000"
+        className={`${field} text-center text-2xl font-black tracking-[0.5em] tabular-nums`}
+        autoFocus
+      />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <button type="submit" disabled={busy} className={button}>
+        {busy && <Loader2 className="w-5 h-5 animate-spin" />}
+        Verify and sign in
+      </button>
+      <div className="flex items-center justify-between text-sm pt-1">
+        <button
+          type="button"
+          onClick={() => {
+            setStep('email');
+            setError('');
+            setNotice('');
+          }}
+          className="font-semibold text-slate-500 hover:text-slate-800"
+        >
+          Change email
+        </button>
+        <button
+          type="button"
+          onClick={sendCode}
+          disabled={busy || resendIn > 0}
+          className="font-semibold text-indigo-600 hover:text-indigo-800 disabled:text-slate-400"
+        >
+          {resendIn > 0 ? `Resend code in 0:${String(resendIn).padStart(2, '0')}` : 'Resend code'}
+        </button>
+      </div>
+    </form>
+  );
+};
+
+/* ---------------------------------------------------------------------------------------------
  * Page
  * -------------------------------------------------------------------------------------------*/
 
 export const Predictions: React.FC = () => {
   const { groups, teams, matches, isLoading, isInitialized } = useTournamentStore();
   const { session, ready } = useSession();
-  const { deadline, closed, msLeft } = useDeadline();
+  const { deadline, logins, closed, msLeft } = usePredictionSettings();
   const { predictions, setPredictions, loaded } = usePredictions();
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get('tab') === 'leaderboard' ? 'leaderboard' : 'picks';
@@ -321,6 +547,17 @@ export const Predictions: React.FC = () => {
     // Show the pick straight away; roll back if the save fails
     setPredictions(list => [...list.filter(p => !(p.user_id === row.user_id && p.group_id === groupId)), row]);
     setSaving({ groupId, teamId });
+    // First pick in a group: glide to the next group. Changing a pick later never scrolls.
+    if (!myPicks[groupId]) {
+      const next = sortedGroups[sortedGroups.findIndex(g => g.id === groupId) + 1];
+      if (next) {
+        const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        setTimeout(
+          () => document.getElementById(`pick-group-${next.id}`)?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' }),
+          300
+        );
+      }
+    }
     const { updated_at: _ignored, ...payload } = row;
     const { error } = await supabase.from('predictions').upsert(payload, { onConflict: 'user_id,group_id' });
     setSaving(null);
@@ -338,6 +575,8 @@ export const Predictions: React.FC = () => {
   }
 
   const pickedCount = sortedGroups.filter(g => myPicks[g.id]).length;
+  const provider = session?.user.app_metadata?.provider;
+  const methodOff = !!session && logins.loaded && ((provider === 'google' && !logins.google) || (provider === 'email' && !logins.email));
   const me = leaderboard.find(r => r.userId === userId);
   const time = deadline.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const deadlineText =
@@ -436,15 +675,39 @@ export const Predictions: React.FC = () => {
                 <p className="mt-1 text-sm text-slate-500">
                   {closed
                     ? 'Sign in to see how your picks are doing, or check the leaderboard.'
-                    : 'We only use your name and photo for the leaderboard.'}
+                    : 'We only use your name for the leaderboard.'}
+                </p>
+                <div className="mt-4 mx-auto max-w-sm space-y-4">
+                  {!logins.loaded && <Loader2 className="mx-auto w-6 h-6 animate-spin text-slate-400" />}
+                  {logins.google && (
+                    <button
+                      onClick={signIn}
+                      disabled={signingIn}
+                      className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-white ring-1 ring-slate-300 px-5 py-3 font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:scale-[0.98] transition disabled:opacity-60"
+                    >
+                      {signingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : <GoogleIcon />}
+                      Continue with Google
+                    </button>
+                  )}
+                  {logins.google && logins.email && (
+                    <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <span className="h-px flex-1 bg-slate-200" /> or <span className="h-px flex-1 bg-slate-200" />
+                    </div>
+                  )}
+                  {logins.email && <EmailOtpSignIn />}
+                </div>
+              </div>
+            ) : methodOff ? (
+              <div className="rounded-2xl bg-amber-50 ring-1 ring-amber-200 px-4 py-3 flex items-center justify-between gap-3">
+                <p className="text-sm text-amber-900">
+                  {provider === 'google' ? 'Google' : 'Cubet email'} sign-in is turned off for picks. Sign out and use{' '}
+                  {provider === 'google' ? 'your Cubet email' : 'Google'} instead.
                 </p>
                 <button
-                  onClick={signIn}
-                  disabled={signingIn}
-                  className="mt-4 inline-flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-xl bg-white ring-1 ring-slate-300 px-5 py-3 font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:scale-[0.98] transition disabled:opacity-60"
+                  onClick={() => supabase.auth.signOut()}
+                  className="flex-shrink-0 rounded-lg bg-white ring-1 ring-amber-300 px-3 py-1.5 text-sm font-semibold text-amber-900"
                 >
-                  {signingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : <GoogleIcon />}
-                  Continue with Google
+                  Sign out
                 </button>
               </div>
             ) : (
@@ -478,7 +741,7 @@ export const Predictions: React.FC = () => {
                 winnerId={winners[group.id]}
                 pickCounts={pickCounts.byGroup[group.id] ?? {}}
                 totalPicks={pickCounts.totals[group.id] ?? 0}
-                locked={!session || closed}
+                locked={!session || closed || methodOff}
                 savingTeam={saving?.groupId === group.id ? saving.teamId : undefined}
                 onPick={teamId => pick(group.id, teamId)}
               />

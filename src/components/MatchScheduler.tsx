@@ -5,7 +5,7 @@ import { Calendar, Plus, Trash2, Loader2, ClipboardEdit } from 'lucide-react';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ResultEditor } from './ResultEditor';
 import { KnockoutPanel } from './KnockoutPanel';
-import { sortGroups, sortPools, sortByName, standingIdOf, matchLabel, isKnockout, getKnockout } from '../utils/calculations';
+import { sortGroups, sortPools, sortByName, standingIdOf, matchLabel, isKnockout, getKnockout, pointsPerSetOf } from '../utils/calculations';
 import { confirmDialog, notify, notifyError } from './Dialog';
 
 export const MatchScheduler: React.FC = () => {
@@ -18,6 +18,7 @@ export const MatchScheduler: React.FC = () => {
   const [scheduledTime, setScheduledTime] = useState('');
   const [matchType, setMatchType] = useState<MatchStage>('pool');
   const [matchName, setMatchName] = useState('');
+  const [pointsPerSet, setPointsPerSet] = useState<15 | 21>(15);
   const [loading, setLoading] = useState(false);
   const [resultMatch, setResultMatch] = useState<Match | null>(null);
 
@@ -78,7 +79,8 @@ export const MatchScheduler: React.FC = () => {
             team1Id,
             team2Id,
             name: matchName,
-            scheduledTime
+            scheduledTime,
+            pointsPerSet
           });
         } catch (error) {
           notifyError(error, 'Failed to schedule match');
@@ -122,7 +124,8 @@ export const MatchScheduler: React.FC = () => {
         team2Position: 'right',
         status: 'upcoming',
         history: [], // Initialize empty history for score tracking
-        scheduledTime: scheduledTime.trim() || null
+        scheduledTime: scheduledTime.trim() || null,
+        pointsPerSet
       };
 
       await addMatch(newMatch);
@@ -184,6 +187,7 @@ export const MatchScheduler: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setMatchType(value);
+                  setPointsPerSet(value === 'pool' ? 15 : 21);
                   setSelectedPool('');
                   resetTeams();
                 }}
@@ -200,6 +204,29 @@ export const MatchScheduler: React.FC = () => {
               Knockout matches can pair any two teams in the group and don't count toward pool standings.
             </p>
           )}
+        </div>
+
+        {/* Set length */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Points per set</label>
+          <div className="grid grid-cols-2 gap-2">
+            {([15, 21] as const).map(points => (
+              <button
+                key={points}
+                type="button"
+                onClick={() => setPointsPerSet(points)}
+                aria-pressed={pointsPerSet === points}
+                className={`py-2.5 px-2 rounded-lg text-sm font-semibold border-2 transition ${
+                  pointsPerSet === points ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700'
+                }`}
+              >
+                {points} points
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-600 mt-2">
+            Win by 2, up to {pointsPerSet === 21 ? 30 : 21} max. Best of 3 sets.
+          </p>
         </div>
 
         {/* Group & Pool Selection */}
@@ -350,6 +377,7 @@ export const MatchScheduler: React.FC = () => {
                       {match.scheduledTime && (
                         <span className="text-xs font-medium text-gray-600">🕒 {match.scheduledTime}</span>
                       )}
+                      <span className="text-xs font-medium text-gray-600">{pointsPerSetOf(match)} pts/set</span>
                     </div>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex-1 min-w-0">

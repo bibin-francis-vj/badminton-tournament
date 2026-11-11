@@ -71,7 +71,7 @@ interface TournamentState {
   // Results & knockouts (throw on failure)
   /** Admin enters/edits the result of a match that is not live. */
   setMatchResult: (matchId: string, sets: { team1: number; team2: number }[], winner: 'team1' | 'team2') => Promise<void>;
-  createKnockoutMatch: (input: { groupId: string; stage: Exclude<MatchStage, 'pool'>; slot: number; team1Id: string; team2Id: string; name?: string; scheduledTime?: string | null }) => Promise<void>;
+  createKnockoutMatch: (input: { groupId: string; stage: Exclude<MatchStage, 'pool'>; slot: number; team1Id: string; team2Id: string; name?: string; scheduledTime?: string | null; pointsPerSet?: 15 | 21 }) => Promise<void>;
   createSemiFinals: (groupId: string, pairs: [string, string][]) => Promise<void>;
   createFinal: (groupId: string) => Promise<void>;
 
@@ -907,7 +907,7 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
     await get().refreshData();
   },
 
-  createKnockoutMatch: async ({ groupId, stage, slot, team1Id, team2Id, name, scheduledTime }) => {
+  createKnockoutMatch: async ({ groupId, stage, slot, team1Id, team2Id, name, scheduledTime, pointsPerSet }) => {
     const teams = get().teams;
     const team1 = teams.find(t => t.id === team1Id);
     const team2 = teams.find(t => t.id === team2Id);
@@ -937,7 +937,8 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
       stage,
       bracketSlot: slot,
       matchName: name?.trim() || (stage === 'final' ? 'Final' : `Semi-final ${slot}`),
-      scheduledTime: scheduledTime?.trim() || null
+      scheduledTime: scheduledTime?.trim() || null,
+      pointsPerSet: pointsPerSet ?? 21
     });
     await get().refreshData();
   },
