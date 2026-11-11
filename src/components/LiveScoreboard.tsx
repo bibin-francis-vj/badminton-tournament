@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Crown, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
@@ -26,15 +26,87 @@ const EmptyState: React.FC<{ text: string }> = ({ text }) => (
  * Courts tab
  * -------------------------------------------------------------------------------------------*/
 
+/** A shuttlecock, cork down (the way it falls). */
+const Shuttlecock: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 24 34" className={className} aria-hidden="true">
+    <path d="M3 2 L21 2 L15.5 21 L8.5 21 Z" fill="#ffffff" stroke="#cbd5e1" strokeWidth="0.8" strokeLinejoin="round" />
+    <path d="M8 2 L10.4 21 M12 2 L12 21 M16 2 L13.6 21" stroke="#cbd5e1" strokeWidth="0.7" />
+    <path d="M5 9 H19 M6.8 15 H17.2" stroke="#94a3b8" strokeWidth="0.7" />
+    <rect x="8" y="20" width="8" height="3" rx="1" fill="#bef264" />
+    <path d="M8 23 H16 V25 A4 4 0 0 1 8 25 Z" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="0.6" />
+  </svg>
+);
+
+/** Distance the shuttle slides along the floor after it lands. */
+const SLIDE_PX = 40;
+
+/**
+ * A point being won: the shuttle flies in on an arc, hits the floor (the row's bottom line) cork first,
+ * bounces, slides with a skid mark and a puff of dust, tips onto its side and fades.
+ * Three nested layers move it sideways, up/down and spin it, so each can have its own timing.
+ */
+const ShuttleLanding: React.FC<{ restRight: string }> = ({ restRight }) => (
+  <span
+    className="pointer-events-none absolute bottom-0 z-0"
+    style={{ right: `calc(${restRight} + ${SLIDE_PX}px)` }}
+    aria-hidden="true"
+  >
+    {/* skid mark from the landing spot to where it stops */}
+    <span className="absolute bottom-[1px] left-0 h-[2px] rounded-full bg-gradient-to-r from-lime-300/0 via-lime-200/70 to-white/80 animate-shuttle-skid" style={{ width: SLIDE_PX }} />
+    {/* dust where it hits */}
+    <span className="absolute bottom-0 left-0 w-2 h-2 -ml-1 rounded-full bg-white/70 animate-shuttle-dust [--dust-x:-14px]" />
+    <span className="absolute bottom-0 left-0 w-1.5 h-1.5 -ml-1 rounded-full bg-white/60 animate-shuttle-dust [--dust-x:-4px] [animation-delay:40ms]" />
+    <span className="absolute bottom-0 left-0 w-1.5 h-1.5 -ml-1 rounded-full bg-lime-200/70 animate-shuttle-dust [--dust-x:10px] [animation-delay:20ms]" />
+    {/* the shuttle */}
+    <span className="absolute bottom-0 left-0 animate-shuttle-x">
+      <span className="block animate-shuttle-y">
+        <span className="block -ml-[9px] w-[18px] h-[26px] origin-[50%_76%] animate-shuttle-spin">
+          <Shuttlecock className="w-full h-full drop-shadow-[0_3px_3px_rgba(0,0,0,0.55)]" />
+        </span>
+      </span>
+    </span>
+  </span>
+);
+
+/**
+ * Each time a team's score goes up in the current set, returns a new number for that team
+ * (used as a React key to replay the point animation). Nothing plays on first load,
+ * on a new set or a new match, or when a point is undone.
+ */
+const usePointHits = (match: Match) => {
+  const current = match.sets.find(s => s.setNumber === match.currentSetNumber);
+  const t1 = current?.score.team1 ?? 0;
+  const t2 = current?.score.team2 ?? 0;
+  const prev = useRef({ id: match.id, set: match.currentSetNumber, t1, t2 });
+  const [hits, setHits] = useState({ team1: 0, team2: 0 });
+  useEffect(() => {
+    const p = prev.current;
+    if (p.id === match.id && p.set === match.currentSetNumber) {
+      if (t1 > p.t1) setHits(h => ({ ...h, team1: h.team1 + 1 }));
+      if (t2 > p.t2) setHits(h => ({ ...h, team2: h.team2 + 1 }));
+    }
+    prev.current = { id: match.id, set: match.currentSetNumber, t1, t2 };
+  }, [match.id, match.currentSetNumber, t1, t2]);
+  return hits;
+};
+
 /** Big scoreboard for the match currently live on a court. */
 const LiveCourtCard: React.FC<{ court: Court; match: Match; label: string }> = ({ court, match, label }) => {
   const current = match.sets.find(s => s.setNumber === match.currentSetNumber);
   const finishedSets = match.sets.filter(s => s.winner && s.setNumber !== match.currentSetNumber);
+  const hits = usePointHits(match);
 
   const row = (key: 'team1' | 'team2') => {
     const serving = match.servingTeam === key;
+    const hit = hits[key];
     return (
-      <div className="flex items-center gap-3 py-2.5">
+      <div key={`${key}-${hit}`} className={`relative flex items-center gap-3 py-2.5 -mx-4 px-4 ${hit ? 'animate-row-flash' : ''}`}>
+        {hit > 0 && (
+          <ShuttleLanding
+            // comes to rest just left of the set chips and score
+            restRight={`calc(1rem + 3.5rem + ${finishedSets.length} * 2.125rem + 0.25rem)`}
+          />
+        )}
         <div className="w-5 flex-shrink-0 flex justify-center">
           {serving && <span className="text-base" title="Serving" aria-label="Serving">🏸</span>}
         </div>
@@ -57,8 +129,14 @@ const LiveCourtCard: React.FC<{ court: Court; match: Match; label: string }> = (
               {s.score[key]}
             </span>
           ))}
-          <span className={`w-14 text-right text-4xl font-black tabular-nums ${serving ? 'text-lime-300' : 'text-white'}`}>
-            {current?.score[key] ?? 0}
+          <span className="relative z-10 w-14 flex justify-end">
+            <span
+              className={`inline-block text-4xl font-black tabular-nums origin-center ${serving ? 'text-lime-300' : 'text-white'} ${
+                hit ? 'animate-score-hit' : ''
+              }`}
+            >
+              {current?.score[key] ?? 0}
+            </span>
           </span>
         </div>
       </div>

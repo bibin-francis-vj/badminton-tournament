@@ -131,3 +131,68 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .animate-score-pop, .animate-float-up { animation: none; }
 }
+
+/* Live page: when a team wins a point the shuttle flies in, lands on the floor, slides and tips over.
+   Timeline (1.6s): flight 0-50%, lands at 50%, bounce, slide to 75%, tip over, fade out at the end. */
+@keyframes shuttleX {
+  0% { transform: translateX(-190px); animation-timing-function: cubic-bezier(0.25, 0.1, 0.6, 1); }
+  50% { transform: translateX(0); animation-timing-function: cubic-bezier(0.15, 0.7, 0.3, 1); }
+  76%, 100% { transform: translateX(40px); }
+}
+@keyframes shuttleY {
+  0% { transform: translateY(-58px); animation-timing-function: cubic-bezier(0.3, 0, 0.7, 0.4); }
+  14% { transform: translateY(-72px); animation-timing-function: cubic-bezier(0.55, 0, 1, 0.5); }
+  50% { transform: translateY(-1px); animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1); }
+  57% { transform: translateY(-9px); animation-timing-function: cubic-bezier(0.6, 0, 1, 0.6); }
+  64% { transform: translateY(-2px); }
+  /* lying on its side, the shuttle's middle sits higher than the cork tip did */
+  78%, 100% { transform: translateY(-6px); }
+}
+@keyframes shuttleSpin {
+  0% { opacity: 0; transform: rotate(-150deg); }
+  8% { opacity: 1; }
+  14% { transform: rotate(-110deg); }
+  50% { transform: rotate(-28deg); }
+  57% { transform: rotate(-12deg); }
+  66% { transform: rotate(-58deg); }
+  76% { transform: rotate(-96deg); }
+  82% { transform: rotate(-84deg); }
+  88% { opacity: 1; transform: rotate(-88deg); }
+  100% { opacity: 0; transform: rotate(-88deg); }
+}
+.animate-shuttle-x { animation: shuttleX 1.6s both; }
+.animate-shuttle-y { animation: shuttleY 1.6s both; }
+.animate-shuttle-spin { animation: shuttleSpin 1.6s linear both; }
+@keyframes shuttleDust {
+  0%, 49% { opacity: 0; transform: translate(0, 0) scale(0.3); }
+  53% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(var(--dust-x, 0px), -12px) scale(1.6); }
+}
+.animate-shuttle-dust { animation: shuttleDust 1.6s ease-out both; }
+@keyframes shuttleSkid {
+  0%, 50% { opacity: 0; transform: scaleX(0); }
+  56% { opacity: 0.9; }
+  76% { transform: scaleX(1); opacity: 0.7; }
+  100% { opacity: 0; transform: scaleX(1); }
+}
+.animate-shuttle-skid { animation: shuttleSkid 1.6s ease-out both; transform-origin: left center; }
+@keyframes scoreHit {
+  0%, 48% { transform: scale(1); text-shadow: none; }
+  56% { transform: scale(1.35); text-shadow: 0 0 18px rgba(190, 242, 100, 0.9); }
+  100% { transform: scale(1); text-shadow: none; }
+}
+.animate-score-hit {
+  animation: scoreHit 1.6s ease-out;
+}
+@keyframes rowFlash {
+  0%, 48% { background-color: transparent; }
+  56% { background-color: rgba(190, 242, 100, 0.14); }
+  100% { background-color: transparent; }
+}
+.animate-row-flash {
+  animation: rowFlash 1.8s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-shuttle-x, .animate-shuttle-y, .animate-shuttle-spin, .animate-shuttle-dust, .animate-shuttle-skid { animation: none; opacity: 0; }
+  .animate-score-hit, .animate-row-flash { animation: none; }
+}

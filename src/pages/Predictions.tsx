@@ -8,11 +8,10 @@ import { getKnockout, sortByName, sortGroups } from '../utils/calculations';
 import type { Group, Team } from '../types';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { notifyError } from '../components/Dialog';
+import { usePredictionSettings } from '../hooks/usePredictionSettings';
 
 /** Points for each correct group-winner pick. */
 export const POINTS_PER_PICK = 10;
-/** Used until the real close time (set by the admin, table prediction_settings) has loaded. */
-const FALLBACK_DEADLINE = '2026-11-11T20:00:00+05:30';
 
 interface Prediction {
   user_id: string;
@@ -54,36 +53,6 @@ const useSession = () => {
   return { session, ready };
 };
 
-/** Close time and allowed sign-in methods, both set by the admin. */
-const usePredictionSettings = () => {
-  const [deadline, setDeadline] = useState(() => new Date(FALLBACK_DEADLINE));
-  const [logins, setLogins] = useState({ google: false, email: false, loaded: false });
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const load = () =>
-      supabase
-        .from('prediction_settings')
-        .select('deadline, google_login, email_login')
-        .eq('id', 1)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data?.deadline) setDeadline(new Date(data.deadline));
-          if (data) setLogins({ google: data.google_login, email: data.email_login, loaded: true });
-        });
-    load();
-    // The admin can change the close time (or close picks now) at any moment
-    const channel = supabase
-      .channel('prediction-settings')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'prediction_settings' }, () => load())
-      .subscribe();
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      clearInterval(timer);
-      supabase.removeChannel(channel);
-    };
-  }, []);
-  return { deadline, logins, closed: now >= deadline.getTime(), msLeft: Math.max(0, deadline.getTime() - now) };
-};
 
 const usePredictions = () => {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
