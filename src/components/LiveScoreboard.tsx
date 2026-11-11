@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Crown, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Crown, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
 import { getStandings, standingIdOf, matchLabel, sortStanding, standingHasPoolMatches, sortGroups, sortByName, setDiffOf, pointDiffOf, signed } from '../utils/calculations';
 import type { Court, Match, Standing, Team } from '../types';
@@ -184,9 +184,49 @@ const UpNextRow: React.FC<{ match: Match; label: string; first?: boolean }> = ({
   </div>
 );
 
+/** One match in a court's full list: time, teams, and the result or status. */
+const CourtMatchRow: React.FC<{ match: Match; label: string; first?: boolean }> = ({ match, label, first }) => {
+  const done = match.status === 'completed';
+  const live = match.status === 'live';
+  const won = (key: 'team1' | 'team2') => done && match.winner?.id === match[key].id;
+  return (
+    <div className={`flex items-center gap-3 ${first ? '' : 'pt-2.5 mt-2.5 border-t border-slate-100'} ${done ? 'opacity-80' : ''}`}>
+      <div className="w-14 flex-shrink-0 text-center text-sm font-black text-slate-900 leading-tight">{match.scheduledTime ?? '—'}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-semibold text-indigo-700 truncate">{label}</div>
+        <div className="text-sm leading-snug break-words">
+          <span className={won('team1') ? 'font-extrabold text-green-700' : 'font-semibold text-slate-900'}>{match.team1.name}</span>{' '}
+          <span className="font-normal text-slate-400">vs</span>{' '}
+          <span className={won('team2') ? 'font-extrabold text-green-700' : 'font-semibold text-slate-900'}>{match.team2.name}</span>
+        </div>
+        {done && playedSets(match).length > 0 && (
+          <div className="text-[11px] text-slate-500 tabular-nums">
+            {playedSets(match).map(s => `${s.score.team1}–${s.score.team2}`).join(', ')}
+          </div>
+        )}
+      </div>
+      <div className="flex-shrink-0">
+        {live ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-extrabold text-white">
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> LIVE
+          </span>
+        ) : done ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-green-700">
+            <CheckCircle2 className="w-3.5 h-3.5" /> {match.score.team1}–{match.score.team2}
+          </span>
+        ) : match.pendingApproval ? (
+          <span className="text-[10px] font-bold text-orange-600">APPROVAL</span>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 const CourtsTab: React.FC = () => {
   const { courts, matches, groups, pools } = useTournamentStore();
   const sortedCourts = sortByName(courts);
+  // Courts whose full match list is open
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
   if (sortedCourts.length === 0) return <EmptyState text="No courts have been set up yet." />;
 
@@ -198,6 +238,11 @@ const CourtsTab: React.FC = () => {
           .filter(m => m.courtId === court.id && m.status === 'upcoming')
           .sort((a, b) => (a.queueOrder ?? 999) - (b.queueOrder ?? 999));
         const shownQueue = queue.slice(0, live ? 2 : 3);
+        const all = matches
+          .filter(m => m.courtId === court.id)
+          .sort((a, b) => (a.queueOrder ?? 999) - (b.queueOrder ?? 999));
+        const expanded = !!open[court.id];
+        const played = all.filter(m => m.status === 'completed').length;
 
         return (
           <section key={court.id} className="space-y-2">
@@ -213,19 +258,31 @@ const CourtsTab: React.FC = () => {
               </div>
             )}
 
-            {shownQueue.length > 0 && (
-              <div className="rounded-2xl bg-white border border-slate-200 p-4">
-                <div className="flex items-center justify-between mb-2.5">
+            {all.length > 0 && (
+              <div className="rounded-2xl bg-white border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setOpen(o => ({ ...o, [court.id]: !o[court.id] }))}
+                  aria-expanded={expanded}
+                  className="w-full flex items-center justify-between gap-2 px-4 pt-3.5 pb-2.5 text-left"
+                >
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5" /> Up next
+                    <Clock className="w-3.5 h-3.5" /> {expanded ? `All matches · ${played}/${all.length} played` : 'Up next'}
                   </span>
-                  {queue.length > shownQueue.length && (
-                    <span className="text-[11px] text-slate-400">+{queue.length - shownQueue.length} more</span>
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-600">
+                    {expanded ? 'Show less' : queue.length > shownQueue.length ? `+${queue.length - shownQueue.length} more · All` : 'All matches'}
+                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                <div className="px-4 pb-4">
+                  {expanded ? (
+                    all.map((m, i) => <CourtMatchRow key={m.id} match={m} label={matchLabel(m, groups, pools)} first={i === 0} />)
+                  ) : shownQueue.length > 0 ? (
+                    shownQueue.map((m, i) => <UpNextRow key={m.id} match={m} label={matchLabel(m, groups, pools)} first={i === 0} />)
+                  ) : (
+                    <p className="text-sm text-slate-500">All matches on this court are done.</p>
                   )}
                 </div>
-                {shownQueue.map((m, i) => (
-                  <UpNextRow key={m.id} match={m} label={matchLabel(m, groups, pools)} first={i === 0} />
-                ))}
               </div>
             )}
           </section>

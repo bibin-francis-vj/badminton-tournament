@@ -15,13 +15,41 @@ import { formatCountdown, usePredictionSettings } from '../hooks/usePredictionSe
  */
 const useScreenHeight = () => {
   useEffect(() => {
-    const set = () => document.documentElement.style.setProperty('--app-h', `${window.innerHeight}px`);
+    const html = document.documentElement;
+    const body = document.body;
+    const before = { htmlOverflow: html.style.overflow, bodyOverflow: body.style.overflow, bodyMinHeight: body.style.minHeight, htmlBg: html.style.backgroundColor, bodyBg: body.style.backgroundColor, overscroll: html.style.overscrollBehavior };
+    const phone = window.matchMedia('(max-width: 767px)');
+
+    const set = () => {
+      html.style.setProperty('--app-h', `${window.innerHeight}px`);
+      if (phone.matches) {
+        // The page is exactly one screen: no scrolling, and no white page showing past the photo
+        html.style.overflow = 'hidden';
+        body.style.overflow = 'hidden';
+        body.style.minHeight = '0';
+        html.style.overscrollBehavior = 'none';
+      } else {
+        html.style.overflow = before.htmlOverflow;
+        body.style.overflow = before.bodyOverflow;
+        body.style.minHeight = before.bodyMinHeight;
+        html.style.overscrollBehavior = before.overscroll;
+      }
+    };
+    // Dark behind the page so a bounce at the edges never flashes white
+    html.style.backgroundColor = '#020617';
+    body.style.backgroundColor = '#020617';
     set();
     window.addEventListener('resize', set);
     window.addEventListener('orientationchange', set);
     return () => {
       window.removeEventListener('resize', set);
       window.removeEventListener('orientationchange', set);
+      html.style.overflow = before.htmlOverflow;
+      body.style.overflow = before.bodyOverflow;
+      body.style.minHeight = before.bodyMinHeight;
+      html.style.backgroundColor = before.htmlBg;
+      body.style.backgroundColor = before.bodyBg;
+      html.style.overscrollBehavior = before.overscroll;
     };
   }, []);
 };

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Crown, KeyRound, Loader2, Lock, Mail, Unlock, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { confirmDialog, notify } from './Dialog';
+import { PredictionPicks } from './PredictionPicks';
 
 /** "2026-11-11T20:00" in the admin's own time zone, for <input type="datetime-local">. */
 const toLocalInput = (date: Date) => {
@@ -239,6 +240,8 @@ export const PredictionSettings: React.FC = () => {
           Save sign-in options
         </button>
       </div>
+
+      <PredictionPicks />
     </div>
   );
 };
