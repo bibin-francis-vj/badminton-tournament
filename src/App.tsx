@@ -4,6 +4,7 @@ import { Dashboard } from './pages/Dashboard';
 import { HomePage } from './pages/HomePage';
 import { RefereePanel } from './pages/RefereePanel';
 import { LiveView } from './pages/LiveView';
+import { Predictions } from './pages/Predictions';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
 import { RefereeProtectedRoute } from './components/RefereeProtectedRoute';
@@ -53,6 +54,7 @@ function App() {
           } 
         />
         <Route path="/live" element={<LiveView />} />
+        <Route path="/predict" element={<Predictions />} />
         {/* Bracket is a tab of the live page now; keep the old address working */}
         <Route path="/live/bracket" element={<Navigate to="/live?tab=bracket" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />

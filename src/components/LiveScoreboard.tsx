@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X } from 'lucide-react';
+import { ArrowLeft, Crown, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
 import { getStandings, standingIdOf, matchLabel, sortStanding, standingHasPoolMatches, sortGroups, sortByName, setDiffOf, pointDiffOf, signed } from '../utils/calculations';
 import type { Court, Match, Standing, Team } from '../types';
@@ -449,6 +449,12 @@ export const LiveScoreboard: React.FC = () => {
               <ArrowLeft className="w-4 h-4" /> Home
             </Link>
             <div className="flex gap-2">
+              <Link
+                to="/predict"
+                className="h-10 rounded-xl bg-lime-300 text-slate-900 hover:bg-lime-200 px-3 flex items-center gap-1.5 text-sm font-extrabold transition"
+              >
+                <Crown className="w-4 h-4" /> Predict
+              </Link>
               <button onClick={() => refreshData()} aria-label="Refresh" className={iconButton}>
                 <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
               </button>

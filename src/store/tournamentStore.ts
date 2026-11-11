@@ -77,9 +77,9 @@ interface TournamentState {
 
   // Utility
   /** Matches back to 0-0 / upcoming and team stats to zero; all setup data is kept. Throws on failure. */
-  resetScores: () => Promise<void>;
+  resetScores: (resetPassword: string) => Promise<void>;
   /** Delete all data (teams, groups, pools, courts, matches, referees). Throws on failure. */
-  resetEverything: () => Promise<void>;
+  resetEverything: (resetPassword: string) => Promise<void>;
   recalculateAllStatistics: () => Promise<void>;
   getTeamStats: () => Team[];
 }
@@ -1032,13 +1032,13 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
     await get().refreshData();
   },
 
-  resetScores: async () => {
-    await supabaseStorage.resetScores();
+  resetScores: async resetPassword => {
+    await supabaseStorage.resetScores(resetPassword);
     await get().refreshData();
   },
 
-  resetEverything: async () => {
-    await supabaseStorage.resetEverything();
+  resetEverything: async resetPassword => {
+    await supabaseStorage.resetEverything(resetPassword);
     await get().refreshData();
   },
 

@@ -10,13 +10,22 @@ const OPTIONS: Record<Mode, { title: string; summary: string; keeps: string[]; r
     title: 'Reset scores only',
     summary: 'Start the scoring again with the same setup.',
     keeps: ['Groups, pools and teams', 'All matches (with their court and queue order)', 'Courts and referees'],
-    removes: ['All match scores and results (every match back to upcoming, 0–0)', 'Team stats, standings edits and pending approvals']
+    removes: [
+      'All match scores and results (every match back to upcoming, 0–0)',
+      'Team stats, standings edits and pending approvals',
+      'All audience predictions and the leaderboard'
+    ]
   },
   everything: {
     title: 'Reset everything',
     summary: 'Delete all data and start with an empty app.',
     keeps: [],
-    removes: ['All teams, groups and pools', 'All matches, results and scores', 'All courts and referee accounts']
+    removes: [
+      'All teams, groups and pools',
+      'All matches, results and scores',
+      'All courts and referee accounts',
+      'All audience predictions and the leaderboard'
+    ]
   }
 };
 
@@ -48,15 +57,24 @@ export const ResetDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }
     setBusy(true);
     try {
-      await (mode === 'scores' ? resetScores() : resetEverything());
-      notify(mode === 'scores' ? 'All matches are back to 0–0 and team stats are cleared.' : 'All data has been deleted. The app is now empty.', {
-        tone: 'success',
-        title: mode === 'scores' ? 'Scores reset' : 'Everything reset'
-      });
+      await (mode === 'scores' ? resetScores(password) : resetEverything(password));
+      notify(
+        mode === 'scores'
+          ? 'All matches are back to 0–0, team stats are cleared and all predictions are removed.'
+          : 'All data has been deleted. The app is now empty.',
+        { tone: 'success', title: mode === 'scores' ? 'Scores reset' : 'Everything reset' }
+      );
       onClose();
     } catch (err) {
       console.error('Reset failed:', err);
-      setError('Reset failed. Check your connection and try again.');
+      const message = (err as { message?: string })?.message ?? '';
+      setError(
+        message.includes('not set up')
+          ? 'Reset password is not set up in the database yet, so predictions cannot be cleared. Nothing was reset.'
+          : message.includes('Incorrect reset password')
+            ? 'The database did not accept the reset password. Nothing was reset.'
+            : 'Reset failed. Check your connection and try again.'
+      );
     } finally {
       setBusy(false);
     }

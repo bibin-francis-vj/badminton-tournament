@@ -268,7 +268,17 @@ const check = (result: { error: unknown }) => {
  * team stats go to zero and admin standing edits (overrides, manual positions) are removed.
  * Groups, pools, teams, matches (with their court and queue position), courts and referees are kept.
  */
-export const resetScores = async (): Promise<void> => {
+/**
+ * Delete every audience prediction. Runs in the database (public.reset_predictions) and needs the reset password,
+ * because nobody may delete other people's picks directly.
+ */
+export const resetPredictions = async (resetPassword: string): Promise<void> => {
+  check(await supabase.rpc('reset_predictions', { p_password: resetPassword }));
+};
+
+export const resetScores = async (resetPassword: string): Promise<void> => {
+  // Predictions first: if that is refused, nothing else is touched
+  await resetPredictions(resetPassword);
   check(await supabase.from('score_history').delete().neq('matchId', ''));
   check(await supabase
     .from('matches')
@@ -297,7 +307,8 @@ export const resetScores = async (): Promise<void> => {
  * Reset everything: delete all data so the app starts empty.
  * Order respects foreign keys (matches/referees -> courts, teams -> pools -> groups).
  */
-export const resetEverything = async (): Promise<void> => {
+export const resetEverything = async (resetPassword: string): Promise<void> => {
+  await resetPredictions(resetPassword);
   check(await supabase.from('score_history').delete().neq('matchId', ''));
   check(await supabase.from('matches').delete().neq('id', ''));
   check(await supabase.from('referees').delete().neq('id', ''));

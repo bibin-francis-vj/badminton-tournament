@@ -1,9 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Crown } from 'lucide-react';
 
 /**
- * Public landing page: full-screen photo hero, title and a single "Live Scores" action.
+ * Public landing page: full-screen photo hero, title, a "Live Scores" action and a "Predict & Win" action.
  * Hero photo: "Jumping smash" by Muktasim Azlan on Unsplash (Unsplash License: free to use, no attribution
  * required), self-hosted in /public/images. Source: https://unsplash.com/photos/rjWfNR_AC5g
  */
@@ -57,7 +57,8 @@ export const HomePage: React.FC = () => (
             Every smash, every rally, live from every court.
           </p>
 
-          <div className="mt-6 flex w-full sm:inline-flex sm:w-auto rounded-2xl bg-white/10 backdrop-blur-xl border border-white/15 p-1.5">
+          <div className="mt-6 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <div className="flex w-full sm:w-auto rounded-2xl bg-white/10 backdrop-blur-xl border border-white/15 p-1.5">
             <Link
               to="/live"
               className="group flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-xl bg-lime-300 text-slate-900 font-extrabold text-base px-7 py-3.5 sm:py-3 shadow-[0_4px_12px_-6px_rgba(190,242,100,0.35)] hover:bg-lime-200 active:scale-[0.98] transition"
@@ -67,6 +68,15 @@ export const HomePage: React.FC = () => (
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-600" />
               </span>
               Live Scores
+              <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+            </Link>
+            </div>
+            <Link
+              to="/predict"
+              className="group flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-2xl bg-slate-950/40 backdrop-blur-xl text-white font-extrabold text-base px-7 py-4 sm:py-3.5 border border-lime-300/40 hover:bg-slate-950/60 hover:border-lime-300/70 active:scale-[0.98] transition"
+            >
+              <Crown className="w-4 h-4 text-lime-300" />
+              Predict & Win
               <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </Link>
           </div>
