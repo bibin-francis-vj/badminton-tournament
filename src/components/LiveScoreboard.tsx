@@ -341,8 +341,8 @@ const StandingTable: React.FC<{ standing: Standing; teams: Team[]; qualifiers: n
 
 const RANKING_STEPS: { title: string; text: string }[] = [
   { title: 'Most wins', text: 'More wins = higher place.' },
-  { title: 'Same wins?', text: 'The team that beat the other goes higher.' },
-  { title: 'Still level?', text: 'Better Sets, then better Pts.' }
+  { title: 'Same wins?', text: 'Better Pts (points won minus points lost) goes higher.' },
+  { title: 'Still level?', text: 'The team that beat the other goes higher, then better Sets.' }
 ];
 
 /** Bottom sheet (dialog on larger screens) explaining how the standings are ranked. */

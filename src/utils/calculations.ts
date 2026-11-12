@@ -18,12 +18,12 @@ export const signed = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n
 
 /**
  * Overall comparison (across pools, e.g. the overall leaderboard):
- * matches won, then set difference, then point difference, then points scored.
+ * matches won, then point difference, then set difference, then points scored.
  */
 export const compareTeams = (a: Team, b: Team) =>
   b.stats.matchesWon - a.stats.matchesWon ||
-  setDiffOf(b) - setDiffOf(a) ||
   pointDiffOf(b) - pointDiffOf(a) ||
+  setDiffOf(b) - setDiffOf(a) ||
   b.stats.points - a.stats.points;
 
 /** Head-to-head: -1 if a beat b in a completed pool match, 1 if b beat a, 0 if they haven't played. */
@@ -43,38 +43,33 @@ const partition = (teams: Team[], key: (t: Team) => number): Team[][] => {
 };
 
 /**
- * Order teams tied on matches won, following the BWF group-stage rules:
+ * Order teams tied on matches won and point difference:
  *  - two tied: the winner of the match between them goes above;
- *  - three or more tied: set difference, then point difference; whenever exactly two remain tied, head-to-head.
- * Anything still tied: points scored, then name (in place of drawing lots).
+ *  - otherwise set difference, then points scored, then name (in place of drawing lots).
  */
 const breakTie = (tied: Team[], matches: Match[]): Team[] => {
   if (tied.length <= 1) return tied;
-  const fallback = (t: Team[]) => [...t].sort((a, b) => b.stats.points - a.stats.points || byName(a, b));
   if (tied.length === 2) {
     const h = headToHead(tied[0], tied[1], matches);
     if (h !== 0) return h < 0 ? tied : [tied[1], tied[0]];
-    // They haven't played each other (yet): set difference, point difference, points scored, name
-    return [...tied].sort(
-      (a, b) => setDiffOf(b) - setDiffOf(a) || pointDiffOf(b) - pointDiffOf(a) || b.stats.points - a.stats.points || byName(a, b)
-    );
   }
-  for (const key of [setDiffOf, pointDiffOf]) {
-    const parts = partition(tied, key);
-    if (parts.length > 1) return parts.flatMap(part => breakTie(part, matches));
-  }
-  return fallback(tied);
+  return [...tied].sort((a, b) => setDiffOf(b) - setDiffOf(a) || b.stats.points - a.stats.points || byName(a, b));
 };
 
 /**
  * Sort the teams of one standings table (pool): admin-set positions first (standingRank 1, 2, …),
- * then everyone else by matches won, with ties broken by the BWF rules (see breakTie).
+ * then everyone else by matches won, then point difference (Pts), then the tie-breaks in breakTie.
  * Pass the matches so head-to-head results can be used.
  */
 export const sortStanding = (teams: Team[], matches: Match[] = []): Team[] => {
   const manual = teams.filter(t => t.standingRank != null).sort((a, b) => a.standingRank! - b.standingRank!);
   const auto = teams.filter(t => t.standingRank == null);
-  return [...manual, ...partition(auto, t => t.stats.matchesWon).flatMap(tied => breakTie(tied, matches))];
+  return [
+    ...manual,
+    ...partition(auto, t => t.stats.matchesWon).flatMap(sameWins =>
+      partition(sameWins, pointDiffOf).flatMap(tied => breakTie(tied, matches))
+    )
+  ];
 };
 
 /** Effective stats: computed from matches, with the admin's won/lost numbers when overridden. */
