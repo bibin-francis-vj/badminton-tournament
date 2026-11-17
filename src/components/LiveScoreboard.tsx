@@ -5,7 +5,7 @@ import { useTournamentStore } from '../store/tournamentStore';
 import { getStandings, standingIdOf, matchLabel, sortStanding, standingHasPoolMatches, sortGroups, sortByName, setDiffOf, pointDiffOf, signed } from '../utils/calculations';
 import type { Court, Match, Standing, Team } from '../types';
 import { LoadingSpinner } from './LoadingSpinner';
-import { KnockoutBracket } from './KnockoutBracket';
+import { GroupBrackets } from './KnockoutBracket';
 import { notify } from './Dialog';
 
 type Tab = 'courts' | 'standings' | 'results' | 'bracket';
@@ -662,7 +662,7 @@ export const LiveScoreboard: React.FC = () => {
         {tab === 'standings' && <StandingsTab groupFilter={groupFilter} />}
         {tab === 'results' && <ResultsTab groupFilter={groupFilter} />}
         {tab === 'bracket' &&
-          (bracketGroupId ? <KnockoutBracket groupId={bracketGroupId} /> : <EmptyState text="No groups have been set up yet." />)}
+          (bracketGroupId ? <GroupBrackets groupId={bracketGroupId} /> : <EmptyState text="No groups have been set up yet." />)}
       </main>
     </div>
   );

@@ -1,9 +1,9 @@
-import { Team, TeamStats, Match, TournamentStats, Player, Group, Pool, Standing } from '../types';
+import { Team, TeamStats, Match, TournamentStats, Player, Group, Pool, Standing, MatchStage } from '../types';
 
 const byName = (a: { name: string }, b: { name: string }) =>
   a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
-const isPoolMatch = (m: Match) => m.stage !== 'semifinal' && m.stage !== 'final';
+const isPoolMatch = (m: Match) => !isKnockout(m);
 
 /** Set difference (sets won − sets lost); an admin-entered value wins. */
 export const setDiffOf = (team: Team): number =>
@@ -92,7 +92,12 @@ export const rightCourtPlayerId = (match: Match, key: 'team1' | 'team2'): string
   return players.find(p => p.id !== startRight)?.id ?? startRight;
 };
 
-export const isKnockout = (match: Pick<Match, 'stage'>) => match.stage === 'semifinal' || match.stage === 'final';
+export const isKnockout = (match: Pick<Match, 'stage'>) =>
+  match.stage === 'semifinal' || match.stage === 'final' || match.stage === 'third_place';
+
+/** Default name of a knockout match. */
+export const knockoutName = (stage: MatchStage | undefined, slot?: number | null) =>
+  stage === 'final' ? 'Final' : stage === 'third_place' ? '3rd place match' : `Semi-final${slot ? ` ${slot}` : ''}`;
 
 /*
  * Set scoring (BWF rally scoring). A set is won by the first side to `points` with a 2-point lead;
@@ -139,16 +144,28 @@ export const isDeuce = (score: SetScore, rule: SetRule) =>
 /** Group of a match (both teams are always in the same group). */
 export const matchGroupId = (match: Pick<Match, 'team1'>) => match.team1.groupId;
 
-/** Knockout matches of one group: semi-finals by bracket slot (1, 2) and the final. */
-export const getKnockout = (matches: Match[], groupId: string) => {
-  const groupKnockouts = matches.filter(m => isKnockout(m) && matchGroupId(m) === groupId);
-  const semis = groupKnockouts.filter(m => m.stage === 'semifinal');
+/** Knockout matches of one bracket: semi-finals by bracket slot (1, 2), the final and the 3rd place match.
+ *  poolId null (default) = the whole group's bracket; a pool id = that pool's own bracket. */
+export const getKnockout = (matches: Match[], groupId: string, poolId: string | null = null) => {
+  const bracket = matches.filter(m => isKnockout(m) && matchGroupId(m) === groupId && (m.knockoutPoolId ?? null) === poolId);
+  const semis = bracket.filter(m => m.stage === 'semifinal');
   return {
     semi1: semis.find(m => m.bracketSlot === 1) ?? semis.find(m => m.bracketSlot == null),
     semi2: semis.find(m => m.bracketSlot === 2) ?? semis.filter(m => m.bracketSlot == null)[1],
-    final: groupKnockouts.find(m => m.stage === 'final')
+    final: bracket.find(m => m.stage === 'final'),
+    thirdPlace: bracket.find(m => m.stage === 'third_place')
   };
 };
+
+/** True when this bracket (group or pool) has any knockout match. */
+export const hasKnockout = (matches: Match[], groupId: string, poolId: string | null = null) => {
+  const k = getKnockout(matches, groupId, poolId);
+  return !!(k.semi1 || k.semi2 || k.final || k.thirdPlace);
+};
+
+/** The other team of a completed match (the loser), if any. */
+export const loserOf = (match?: Match) =>
+  match?.status === 'completed' && match.winner ? (match.winner.id === match.team1.id ? match.team2 : match.team1) : undefined;
 
 /** True when a standings table has at least one pool-stage match (a knockout-only group has none). */
 export const standingHasPoolMatches = (standingId: string, matches: Match[]) =>
@@ -180,8 +197,9 @@ export const getStandings = (groups: Group[], pools: Pool[]): Standing[] =>
 export const matchLabel = (match: Match, groups: Group[], pools: Pool[]): string => {
   if (isKnockout(match)) {
     const group = groups.find(g => g.id === matchGroupId(match));
-    const name = match.matchName || (match.stage === 'final' ? 'Final' : 'Semi-final');
-    return group ? `${group.name} · ${name}` : name;
+    const pool = match.knockoutPoolId ? pools.find(p => p.id === match.knockoutPoolId) : undefined;
+    const name = match.matchName || knockoutName(match.stage);
+    return [group?.name, pool?.name, name].filter(Boolean).join(' · ');
   }
   return teamGroupLabel(match.team1, groups, pools);
 };

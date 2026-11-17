@@ -1,7 +1,7 @@
 import React from 'react';
 import { Trophy } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
-import { getKnockout, sortPools } from '../utils/calculations';
+import { getKnockout, hasKnockout, loserOf, sortPools } from '../utils/calculations';
 import type { Match } from '../types';
 
 /**
@@ -14,6 +14,10 @@ import type { Match } from '../types';
  *      [Finalist 2]
  *        ┌──┴──┐
  *   [Team C]   [Team D]     Semi-final 2
+ *
+ *   [Loser SF1] vs [Loser SF2]  3rd place match
+ *
+ * poolId = a pool's own bracket (its teams only) instead of the whole group's.
  */
 
 type Slot = {
@@ -160,16 +164,29 @@ const TrophyEmblem: React.FC<{ won: boolean }> = ({ won }) => (
   </div>
 );
 
-export const KnockoutBracket: React.FC<{ groupId: string }> = ({ groupId }) => {
+export const KnockoutBracket: React.FC<{ groupId: string; poolId?: string | null }> = ({ groupId, poolId = null }) => {
   const { groups, pools, matches, courts } = useTournamentStore();
   const group = groups.find(g => g.id === groupId);
   if (!group) return null;
 
   const courtName = (id?: string) => courts.find(c => c.id === id)?.name;
-  const { semi1, semi2, final } = getKnockout(matches, groupId);
+  const { semi1, semi2, final, thirdPlace } = getKnockout(matches, groupId, poolId);
+  const pool = poolId ? pools.find(p => p.id === poolId) : undefined;
   const groupPools = sortPools(pools.filter(p => p.groupId === groupId));
-  const twoPools = groupPools.length === 2;
-  const seed = (poolIndex: 0 | 1, place: '1st' | '2nd') => (twoPools ? `${groupPools[poolIndex].name} · ${place}` : 'TBD');
+  const twoPools = !poolId && groupPools.length === 2;
+  const oneTable = !!poolId || groupPools.length === 0; // seeds come from a single standings table
+  const seed = (poolIndex: 0 | 1, place: '1st' | '2nd') => {
+    if (twoPools) return `${groupPools[poolIndex].name} · ${place}`;
+    if (oneTable) return { '0-1st': '1st', '1-2nd': '4th', '0-2nd': '2nd', '1-1st': '3rd' }[`${poolIndex}-${place}`]!;
+    return 'TBD';
+  };
+  const third = thirdPlace?.status === 'completed' ? thirdPlace.winner?.name : undefined;
+  const showThird = !!(thirdPlace || semi1 || semi2);
+  const thirdSlot = (side: 'team1' | 'team2', semi: Match | undefined, label: string): Slot => {
+    if (thirdPlace) return slotOf(thirdPlace, side, '');
+    const loser = loserOf(semi);
+    return loser ? { name: loser.name, placeholder: false, won: false, lost: false } : { name: `Loser ${label}`, placeholder: true, won: false, lost: false };
+  };
 
   // Finalists: the final's teams once it exists, else the semi-final winners, else placeholders
   const finalist = (side: 'team1' | 'team2', semi: Match | undefined, label: string): Slot => {
@@ -187,7 +204,10 @@ export const KnockoutBracket: React.FC<{ groupId: string }> = ({ groupId }) => {
       <div className="pointer-events-none absolute -bottom-24 -right-20 w-72 h-72 rounded-full bg-blue-600/35 blur-3xl" aria-hidden="true" />
 
       <div className="relative max-w-sm mx-auto">
-        <h2 className="text-center text-white font-black uppercase tracking-[0.2em] text-sm">{group.name}</h2>
+        <h2 className="text-center text-white font-black uppercase tracking-[0.2em] text-sm">
+          {group.name}
+          {pool && <span className="block mt-0.5 text-lime-300">{pool.name}</span>}
+        </h2>
         {twoPools && (
           <p className="text-center text-[11px] text-slate-400 mt-1">
             {groupPools[0].name} 1st vs {groupPools[1].name} 2nd · {groupPools[0].name} 2nd vs {groupPools[1].name} 1st
@@ -227,7 +247,7 @@ export const KnockoutBracket: React.FC<{ groupId: string }> = ({ groupId }) => {
                 : 'border border-white/15 text-slate-400 italic'
             }`}
           >
-            {champion ? `🏆 Champion: ${champion}` : 'Champion to be decided'}
+            {champion ? `🏆 ${pool ? 'Winner' : 'Champion'}: ${champion}` : `${pool ? 'Winner' : 'Champion'} to be decided`}
           </div>
         </div>
         <Stem />
@@ -244,7 +264,42 @@ export const KnockoutBracket: React.FC<{ groupId: string }> = ({ groupId }) => {
         <div className="mt-2">
           <MatchCaption title={semi2?.matchName || 'Semi-final 2'} match={semi2} court={courtName(semi2?.courtId)} />
         </div>
+
+        {/* 3rd place match: the two semi-final losers */}
+        {showThird && (
+          <div className="mt-6 rounded-2xl border border-orange-300/25 bg-orange-400/[0.06] p-3">
+            <MatchCaption title={thirdPlace?.matchName || '3rd place match'} match={thirdPlace} court={courtName(thirdPlace?.courtId)} />
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              <TeamBox slot={thirdSlot('team1', semi1, 'SF1')} />
+              <TeamBox slot={thirdSlot('team2', semi2, 'SF2')} />
+            </div>
+            <div className="mt-2 text-center">
+              <span
+                className={`inline-block max-w-full rounded-full px-3 py-1 text-xs break-words ${
+                  third ? 'bg-gradient-to-r from-orange-400 to-amber-300 text-slate-900 font-black' : 'text-slate-400 italic'
+                }`}
+              >
+                {third ? `🥉 3rd place: ${third}` : '3rd place to be decided'}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
+    </div>
+  );
+};
+
+/** A group's brackets: the whole group's, then each pool's own bracket that has matches. */
+export const GroupBrackets: React.FC<{ groupId: string }> = ({ groupId }) => {
+  const { pools, matches } = useTournamentStore();
+  const poolBrackets = sortPools(pools.filter(p => p.groupId === groupId)).filter(p => hasKnockout(matches, groupId, p.id));
+  const showGroup = hasKnockout(matches, groupId) || poolBrackets.length === 0;
+  return (
+    <div className="space-y-4">
+      {showGroup && <KnockoutBracket groupId={groupId} />}
+      {poolBrackets.map(p => (
+        <KnockoutBracket key={p.id} groupId={groupId} poolId={p.id} />
+      ))}
     </div>
   );
 };

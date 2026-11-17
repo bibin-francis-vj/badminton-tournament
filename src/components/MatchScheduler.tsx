@@ -5,7 +5,7 @@ import { Calendar, Plus, Trash2, Loader2, ClipboardEdit } from 'lucide-react';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ResultEditor } from './ResultEditor';
 import { KnockoutPanel } from './KnockoutPanel';
-import { sortGroups, sortPools, sortByName, standingIdOf, matchLabel, isKnockout, getKnockout, pointsPerSetOf } from '../utils/calculations';
+import { sortGroups, sortPools, sortByName, standingIdOf, matchLabel, isKnockout, getKnockout, pointsPerSetOf, knockoutName } from '../utils/calculations';
 import { confirmDialog, notify, notifyError } from './Dialog';
 
 export const MatchScheduler: React.FC = () => {
@@ -25,11 +25,14 @@ export const MatchScheduler: React.FC = () => {
   const knockout = matchType !== 'pool';
   const groupPools = sortPools(pools.filter(p => p.groupId === selectedGroup));
   const needsPool = !knockout && groupPools.length > 0;
+  // Knockouts: '' = the whole group's bracket, a pool id = that pool's own bracket
+  const knockoutPool = knockout && groupPools.length > 0 ? selectedPool : '';
 
-  // Pool matches: teams from the same pool (or same group without pools). Knockouts: any teams in the group.
+  // Pool matches: teams from the same pool (or same group without pools).
+  // Knockouts: any teams in the group, or only that pool's teams for a pool bracket.
   const filteredTeams = !selectedGroup || (needsPool && !selectedPool)
     ? []
-    : sortByName(teams.filter(team => team.groupId === selectedGroup && (!needsPool || team.poolId === selectedPool)));
+    : sortByName(teams.filter(team => team.groupId === selectedGroup && (!(needsPool || knockoutPool) || team.poolId === selectedPool)));
 
   const courtName = (courtId?: string) => courts.find(c => c.id === courtId)?.name;
 
@@ -64,16 +67,17 @@ export const MatchScheduler: React.FC = () => {
       }
 
       if (knockout) {
-        // Semi-finals take the next free bracket slot (1, then 2); the final is slot 1
-        const { semi1, semi2 } = getKnockout(matches, selectedGroup);
-        const slot = matchType === 'final' ? 1 : !semi1 ? 1 : !semi2 ? 2 : 0;
+        // Semi-finals take the next free bracket slot (1, then 2); the final and 3rd place match are slot 1
+        const { semi1, semi2 } = getKnockout(matches, selectedGroup, knockoutPool || null);
+        const slot = matchType !== 'semifinal' ? 1 : !semi1 ? 1 : !semi2 ? 2 : 0;
         if (!slot) {
-          notify('This group already has two semi-finals.', { tone: 'warning' });
+          notify(`${knockoutPool ? 'This pool' : 'This group'} already has two semi-finals.`, { tone: 'warning' });
           return;
         }
         try {
           await createKnockoutMatch({
             groupId: selectedGroup,
+            poolId: knockoutPool || null,
             stage: matchType,
             slot,
             team1Id,
@@ -180,8 +184,8 @@ export const MatchScheduler: React.FC = () => {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Match type
           </label>
-          <div className="grid grid-cols-3 gap-2">
-            {([['pool', 'Pool match'], ['semifinal', 'Semi-final'], ['final', 'Final']] as [MatchStage, string][]).map(([value, label]) => (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {([['pool', 'Pool match'], ['semifinal', 'Semi-final'], ['final', 'Final'], ['third_place', '3rd place']] as [MatchStage, string][]).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
@@ -201,7 +205,8 @@ export const MatchScheduler: React.FC = () => {
           </div>
           {knockout && (
             <p className="text-xs text-gray-600 mt-2">
-              Knockout matches can pair any two teams in the group and don't count toward pool standings.
+              Knockout matches can be for the whole group or for one pool, and don't count toward pool standings.
+              {matchType === 'third_place' && ' The 3rd place match is usually the two semi-final losers.'}
             </p>
           )}
         </div>
@@ -230,7 +235,7 @@ export const MatchScheduler: React.FC = () => {
         </div>
 
         {/* Group & Pool Selection */}
-        <div className={`grid grid-cols-1 ${needsPool ? 'md:grid-cols-2' : ''} gap-4 mb-4`}>
+        <div className={`grid grid-cols-1 ${needsPool || (knockout && groupPools.length > 0) ? 'md:grid-cols-2' : ''} gap-4 mb-4`}>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Group
@@ -271,6 +276,28 @@ export const MatchScheduler: React.FC = () => {
                 {groupPools.map(pool => (
                   <option key={pool.id} value={pool.id}>
                     {pool.name} ({teams.filter(t => t.poolId === pool.id).length} teams)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {knockout && groupPools.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Knockout for
+              </label>
+              <select
+                value={selectedPool}
+                onChange={(e) => {
+                  setSelectedPool(e.target.value);
+                  resetTeams();
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Whole group</option>
+                {groupPools.map(pool => (
+                  <option key={pool.id} value={pool.id}>
+                    {pool.name} only
                   </option>
                 ))}
               </select>
@@ -326,7 +353,7 @@ export const MatchScheduler: React.FC = () => {
                 type="text"
                 value={matchName}
                 onChange={(e) => setMatchName(e.target.value)}
-                placeholder={matchType === 'final' ? 'Final' : 'Semi-final 1'}
+                placeholder={knockoutName(matchType, matchType === 'semifinal' ? 1 : null)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>

@@ -34,7 +34,7 @@ export interface Team {
   standingRank?: number | null; // Admin-set position in its pool (1 = top); null = automatic
 }
 
-export type MatchStage = 'pool' | 'semifinal' | 'final';
+export type MatchStage = 'pool' | 'semifinal' | 'final' | 'third_place';
 
 export interface Set {
   setNumber: number; // 1, 2, or 3
@@ -78,6 +78,7 @@ export interface Match {
   stage?: MatchStage; // Only 'pool' matches count toward standings (default 'pool')
   matchName?: string | null; // e.g. "Semi-final 1", "Final"
   bracketSlot?: number | null; // Semi-final 1 or 2; final = 1
+  knockoutPoolId?: string | null; // Knockouts only: null = the whole group's bracket, a pool id = that pool's own bracket
   pointsPerSet?: 15 | 21 | null; // Set length chosen by the admin; null = 15 for pool, 21 for knockout
   /**
    * Per set number: id of each team's player standing in the RIGHT service court at the start of that set.

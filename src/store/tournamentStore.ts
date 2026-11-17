@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Team, StatsOverride, Match, MatchStage, Court, Referee, Group, Pool, Set, ScoreEvent } from '../types';
 import * as supabaseStorage from '../utils/supabaseStorage';
-import { calculations, getKnockout, setRuleFor, setWinnerOf, standingIdOf, withOverride } from '../utils/calculations';
+import { calculations, getKnockout, knockoutName, loserOf, setRuleFor, setWinnerOf, standingIdOf, withOverride } from '../utils/calculations';
 
 interface TournamentState {
   teams: Team[];
@@ -71,9 +71,12 @@ interface TournamentState {
   // Results & knockouts (throw on failure)
   /** Admin enters/edits the result of a match that is not live. */
   setMatchResult: (matchId: string, sets: { team1: number; team2: number }[], winner: 'team1' | 'team2') => Promise<void>;
-  createKnockoutMatch: (input: { groupId: string; stage: Exclude<MatchStage, 'pool'>; slot: number; team1Id: string; team2Id: string; name?: string; scheduledTime?: string | null; pointsPerSet?: 15 | 21 }) => Promise<void>;
-  createSemiFinals: (groupId: string, pairs: [string, string][]) => Promise<void>;
-  createFinal: (groupId: string) => Promise<void>;
+  /** poolId null/omitted = the whole group's bracket; a pool id = that pool's own bracket. */
+  createKnockoutMatch: (input: { groupId: string; poolId?: string | null; stage: Exclude<MatchStage, 'pool'>; slot: number; team1Id: string; team2Id: string; name?: string; scheduledTime?: string | null; pointsPerSet?: 15 | 21 }) => Promise<void>;
+  createSemiFinals: (groupId: string, pairs: [string, string][], poolId?: string | null) => Promise<void>;
+  createFinal: (groupId: string, poolId?: string | null) => Promise<void>;
+  /** 3rd place match: the losers of the two semi-finals. */
+  createThirdPlace: (groupId: string, poolId?: string | null) => Promise<void>;
 
   // Utility
   /** Matches back to 0-0 / upcoming and team stats to zero; all setup data is kept. Throws on failure. */
@@ -892,13 +895,15 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
     };
     await supabaseStorage.saveMatch(updated);
 
-    // A changed semi-final winner moves into the final, as long as the final hasn't started
+    // A changed semi-final result moves the winner into the final and the loser into the 3rd place match,
+    // as long as that match hasn't started
     if (updated.stage === 'semifinal') {
-      const { final } = getKnockout(get().matches, updated.team1.groupId);
-      if (final && final.status === 'upcoming') {
-        const side = updated.bracketSlot === 2 ? 'team2' : 'team1';
-        if (final[side].id !== updated.winner!.id) {
-          await supabaseStorage.saveMatch({ ...final, [side]: updated.winner! });
+      const { final, thirdPlace } = getKnockout(get().matches, updated.team1.groupId, updated.knockoutPoolId ?? null);
+      const side = updated.bracketSlot === 2 ? 'team2' : 'team1';
+      const loser = updated.winner!.id === updated.team1.id ? updated.team2 : updated.team1;
+      for (const [next, team] of [[final, updated.winner!], [thirdPlace, loser]] as const) {
+        if (next && next.status === 'upcoming' && next[side].id !== team.id) {
+          await supabaseStorage.saveMatch({ ...next, [side]: team });
         }
       }
     }
@@ -907,23 +912,26 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
     await get().refreshData();
   },
 
-  createKnockoutMatch: async ({ groupId, stage, slot, team1Id, team2Id, name, scheduledTime, pointsPerSet }) => {
+  createKnockoutMatch: async ({ groupId, poolId = null, stage, slot, team1Id, team2Id, name, scheduledTime, pointsPerSet }) => {
     const teams = get().teams;
     const team1 = teams.find(t => t.id === team1Id);
     const team2 = teams.find(t => t.id === team2Id);
     if (!team1 || !team2) throw new Error('Select both teams');
     if (team1.id === team2.id) throw new Error('Select two different teams');
     if (team1.groupId !== groupId || team2.groupId !== groupId) throw new Error('Both teams must be in the same group');
+    if (poolId && (team1.poolId !== poolId || team2.poolId !== poolId)) throw new Error('Both teams must be in the same pool');
 
     const existing = get().matches.find(m =>
-      m.stage === stage && m.team1.groupId === groupId && (stage === 'final' || m.bracketSlot === slot)
+      m.stage === stage && m.team1.groupId === groupId && (m.knockoutPoolId ?? null) === poolId &&
+      (stage !== 'semifinal' || m.bracketSlot === slot)
     );
     if (existing) {
-      throw new Error(`${existing.matchName || (stage === 'final' ? 'The final' : `Semi-final ${slot}`)} already exists for this group. Delete it first to recreate it.`);
+      const where = poolId ? 'this pool' : 'this group';
+      throw new Error(`${existing.matchName || knockoutName(stage, slot)} already exists for ${where}. Delete it first to recreate it.`);
     }
 
     await supabaseStorage.saveMatch({
-      id: `match-${stage}-${groupId}-${slot}-${Date.now()}`,
+      id: `match-${stage}-${poolId ?? groupId}-${slot}-${Date.now()}`,
       team1,
       team2,
       score: { team1: 0, team2: 0 },
@@ -936,30 +944,42 @@ export const useTournamentStore = create<TournamentState>((set, get) => ({
       history: [],
       stage,
       bracketSlot: slot,
-      matchName: name?.trim() || (stage === 'final' ? 'Final' : `Semi-final ${slot}`),
+      knockoutPoolId: poolId,
+      matchName: name?.trim() || knockoutName(stage, slot),
       scheduledTime: scheduledTime?.trim() || null,
       pointsPerSet: pointsPerSet ?? 21
     });
     await get().refreshData();
   },
 
-  createSemiFinals: async (groupId, pairs) => {
+  createSemiFinals: async (groupId, pairs, poolId = null) => {
     const ids = pairs.flat();
     if (ids.some((id, i) => ids.indexOf(id) !== i)) throw new Error('A team can only appear in one semi-final');
-    const { semi1, semi2 } = getKnockout(get().matches, groupId);
-    if (semi1 || semi2) throw new Error('Semi-finals already exist for this group. Delete them first to recreate them.');
+    const { semi1, semi2 } = getKnockout(get().matches, groupId, poolId);
+    if (semi1 || semi2) throw new Error('Semi-finals already exist here. Delete them first to recreate them.');
     for (const [index, [team1Id, team2Id]] of pairs.entries()) {
-      await get().createKnockoutMatch({ groupId, stage: 'semifinal', slot: index + 1, team1Id, team2Id });
+      await get().createKnockoutMatch({ groupId, poolId, stage: 'semifinal', slot: index + 1, team1Id, team2Id });
     }
   },
 
-  createFinal: async (groupId) => {
-    const { semi1, semi2, final } = getKnockout(get().matches, groupId);
-    if (final) throw new Error('The final already exists for this group.');
+  createFinal: async (groupId, poolId = null) => {
+    const { semi1, semi2, final } = getKnockout(get().matches, groupId, poolId);
+    if (final) throw new Error('The final already exists here.');
     if (!semi1?.winner || !semi2?.winner || semi1.status !== 'completed' || semi2.status !== 'completed') {
       throw new Error('Both semi-finals must be completed (and approved) before the final can be created.');
     }
-    await get().createKnockoutMatch({ groupId, stage: 'final', slot: 1, team1Id: semi1.winner.id, team2Id: semi2.winner.id });
+    await get().createKnockoutMatch({ groupId, poolId, stage: 'final', slot: 1, team1Id: semi1.winner.id, team2Id: semi2.winner.id });
+  },
+
+  createThirdPlace: async (groupId, poolId = null) => {
+    const { semi1, semi2, thirdPlace } = getKnockout(get().matches, groupId, poolId);
+    if (thirdPlace) throw new Error('The 3rd place match already exists here.');
+    const loser1 = loserOf(semi1);
+    const loser2 = loserOf(semi2);
+    if (!loser1 || !loser2) {
+      throw new Error('Both semi-finals must be completed (and approved) before the 3rd place match can be created.');
+    }
+    await get().createKnockoutMatch({ groupId, poolId, stage: 'third_place', slot: 1, team1Id: loser1.id, team2Id: loser2.id });
   },
 
   renameCourt: async (courtId, name) => {
