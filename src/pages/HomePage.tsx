@@ -101,7 +101,7 @@ export const HomePage: React.FC = () => {
             <h1 className="text-[2.75rem] leading-[0.98] sm:text-6xl lg:text-7xl [@media(max-height:680px)]:text-4xl sm:[@media(max-height:680px)]:!text-5xl font-black tracking-tight drop-shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
               Cubet Badminton
               <span className="block bg-gradient-to-r from-lime-200 via-lime-300 to-emerald-300 bg-clip-text text-transparent">
-                Tournament
+                League
               </span>
             </h1>
             <p className="mt-4 [@media(max-height:680px)]:mt-2 text-base sm:text-lg [@media(max-height:680px)]:text-sm text-slate-200/90 max-w-md">
@@ -147,7 +147,7 @@ export const HomePage: React.FC = () => {
       </main>
 
       <footer className="relative z-10 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] hidden sm:block [@media(max-height:680px)]:!hidden">
-        <div className="max-w-6xl mx-auto text-[11px] text-slate-400 hidden sm:block">Cubet Badminton Tournament · Season 2</div>
+        <div className="max-w-6xl mx-auto text-[11px] text-slate-400 hidden sm:block">Cubet Badminton League · Season 2</div>
       </footer>
     </div>
   );

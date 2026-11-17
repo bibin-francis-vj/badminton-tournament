@@ -50,7 +50,7 @@ export const Dashboard: React.FC = () => {
                 <LayoutDashboard className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600 flex-shrink-0" />
                 <span className="truncate">Admin Dashboard</span>
               </h1>
-              <p className="hidden sm:block text-gray-600 mt-1">Cubet Badminton Tournament · Season 2</p>
+              <p className="hidden sm:block text-gray-600 mt-1">Cubet Badminton League · Season 2</p>
             </div>
             <div className="flex gap-2 flex-shrink-0">
               <button

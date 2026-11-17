@@ -282,6 +282,7 @@ export const resetScores = async (resetPassword: string): Promise<void> => {
   // Predictions first: if that is refused, nothing else is touched
   await resetPredictions(resetPassword);
   check(await supabase.from('score_history').delete().neq('matchId', ''));
+  check(await supabase.from('match_events').delete().neq('match_id', '')); // commentary
   check(await supabase
     .from('matches')
     .update({

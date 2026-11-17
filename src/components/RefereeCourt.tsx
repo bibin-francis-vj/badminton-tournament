@@ -1,53 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftRight, ArrowUpDown, Flag, Loader2, Maximize2, Smartphone, Trophy, Undo2, X as CloseIcon } from 'lucide-react';
+import { ArrowLeftRight, ArrowUpDown, Flag, Loader2, Maximize2, Pause, Play, Smartphone, Sparkles, Trophy, Undo2, X as CloseIcon } from 'lucide-react';
 import type { Match } from '../types';
 import { useTournamentStore } from '../store/tournamentStore';
-import { gamePointFor, isDeuce, rightCourtPlayerId, setRuleFor, setWinnerOf } from '../utils/calculations';
+import { gamePointFor, isDeuce, setRuleFor, setWinnerOf } from '../utils/calculations';
+import { CourtDiagram, Shuttle, courtState, type End, type Key } from './CourtDiagram';
 import { confirmDialog, notifyError } from './Dialog';
-
-type Key = 'team1' | 'team2';
-type End = 'left' | 'right';
-type Half = 'top' | 'bottom';
-
-/*
- * Doubles court seen from above, net in the middle (court 13.4 m long, 6.1 m wide), as % of the court box:
- *   long service line (doubles) 0.76 m from the back → 5.7%  · short service line 1.98 m from the net → 35.2% / 64.8%
- *   singles sidelines 0.46 m in from the sides → 7.5% / 92.5%
- */
-const X = { longService: 5.7, shortService: 35.2 };
-const Y = { singles: 7.5 };
-
-/**
- * Where a team's RIGHT / LEFT service court is on the diagram.
- * Facing the net from the left end your right hand is the bottom of the diagram; from the right end it is the top.
- */
-const courtHalf = (end: End, rightCourt: boolean): Half =>
-  end === 'left' ? (rightCourt ? 'bottom' : 'top') : (rightCourt ? 'top' : 'bottom');
-
-const boxStyle = (end: End, half: Half): React.CSSProperties => ({
-  left: `${end === 'left' ? X.longService : 100 - X.shortService}%`,
-  width: `${X.shortService - X.longService}%`,
-  top: half === 'top' ? '0%' : '50%',
-  height: '50%'
-});
-
-/** Front-court strip between the short service line and the net (used for the score). */
-const frontStyle = (end: End): React.CSSProperties => ({
-  left: end === 'left' ? `${X.shortService}%` : '50%',
-  width: `${50 - X.shortService}%`,
-  top: 0,
-  bottom: 0
-});
-
-/** Shuttlecock glyph. */
-const Shuttle: React.FC<{ className?: string }> = ({ className }) => (
-  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-    <path d="M7 3 L12 14 L17 3 Q12 1 7 3 Z" fill="#ffffff" />
-    <path d="M9.5 3 L12 14 M14.5 3 L12 14" stroke="#cbd5e1" strokeWidth="0.8" />
-    <circle cx="12" cy="17.5" r="4" fill="#facc15" />
-  </svg>
-);
 
 interface Props {
   match: Match;
@@ -57,6 +15,12 @@ interface Props {
   onUndo?: () => void;
   onEndSet?: () => void;
   onFinish?: () => void;
+  /** Set while the match is paused (e.g. "Injury"): points are blocked. */
+  pausedLabel?: string | null;
+  onPause?: () => void;
+  onResume?: () => void;
+  /** Capture a moment (a smash, a drop …) for this team. */
+  onMoment?: (team: Key) => void;
 }
 
 /**
@@ -64,7 +28,7 @@ interface Props {
  * the server and receiver highlighted, scores, +1 buttons, and controls to swap ends, change the serving side
  * or swap a team's players.
  */
-export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoint, onUndo, onEndSet, onFinish }) => {
+export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoint, onUndo, onEndSet, onFinish, pausedLabel, onPause, onResume, onMoment }) => {
   const setMatchSetup = useTournamentStore(s => s.setMatchSetup);
   const [busy, setBusy] = useState(false);
   const [pops, setPops] = useState<{ id: number; end: End }[]>([]);
@@ -133,30 +97,9 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
   // The match ends / this view goes away: leave full screen
   useEffect(() => () => leaveFullscreen(), [leaveFullscreen]);
 
-  const endOf = (key: Key): End => {
-    const team1End = match.team1Position || 'left';
-    return key === 'team1' ? team1End : team1End === 'left' ? 'right' : 'left';
-  };
-  const keyAt = (end: End): Key => (endOf('team1') === end ? 'team1' : 'team2');
-
-  const currentSet = match.sets?.find(s => s.setNumber === match.currentSetNumber);
-  const score = (key: Key) => currentSet?.score[key] ?? 0;
-  const server: Key = match.servingTeam || 'team1';
-  const receiver: Key = server === 'team1' ? 'team2' : 'team1';
-  // Server serves from the right court on an even score, left on odd; the receiver stands diagonally opposite
-  const serveFromRight = score(server) % 2 === 0;
+  const { keyAt, score, server, receiver, serveFromRight, positions, serverPlayer, receiverPlayer } = courtState(match);
   const atStart = score('team1') === 0 && score('team2') === 0;
-
-  /** Players of a team by service court. */
-  const positions = (key: Key) => {
-    const players = match[key].players;
-    const rightId = rightCourtPlayerId(match, key);
-    const right = players.find(p => p.id === rightId) ?? players[0];
-    const left = players.find(p => p.id !== right?.id) ?? right;
-    return { right, left };
-  };
-  const serverPlayer = serveFromRight ? positions(server).right : positions(server).left;
-  const receiverPlayer = serveFromRight ? positions(receiver).right : positions(receiver).left;
+  const paused = !!pausedLabel;
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -194,38 +137,6 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
     })) run(() => setMatchSetup(match.id, { swapPlayers: key }));
   };
 
-  /** One service court with the player standing in it. */
-  const serviceCourt = (end: End, rightCourt: boolean) => {
-    const key = keyAt(end);
-    const player = rightCourt ? positions(key).right : positions(key).left;
-    const isServer = key === server && player?.id === serverPlayer?.id;
-    const isReceiver = key === receiver && player?.id === receiverPlayer?.id;
-    const half = courtHalf(end, rightCourt);
-    return (
-      <div
-        key={`${end}-${rightCourt}`}
-        className={`absolute flex flex-col items-center justify-center p-1 ${
-          isServer ? 'bg-lime-300/35 ring-2 ring-inset ring-lime-300' : isReceiver ? 'bg-white/10 ring-2 ring-inset ring-white/70' : ''
-        }`}
-        style={boxStyle(end, half)}
-      >
-        <span
-          className={`max-w-full rounded-md px-1.5 py-0.5 text-[11px] sm:text-xs font-bold leading-tight text-center break-words shadow ${
-            isServer ? 'bg-lime-300 text-slate-900' : isReceiver ? 'bg-white text-slate-900' : 'bg-slate-900/60 text-white'
-          }`}
-        >
-          {player?.name ?? '—'}
-        </span>
-        {(isServer || isReceiver) && (
-          <span className={`mt-0.5 flex items-center gap-0.5 text-[9px] font-extrabold uppercase tracking-wider ${isServer ? 'text-lime-200' : 'text-white/90'}`}>
-            {isServer && <Shuttle className="w-3 h-3 animate-bounce" />}
-            {isServer ? 'Serving' : 'Receiving'}
-          </span>
-        )}
-      </div>
-    );
-  };
-
   const btn = 'inline-flex items-center justify-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50 transition';
   const live = match.status === 'live';
 
@@ -238,7 +149,7 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
   const golden = setScore.team1 === rule.cap - 1 && setScore.team2 === rule.cap - 1;
   const deuce = isDeuce(setScore, rule);
   const setOver = !!setWonBy && !disabled;
-  const blocked = loading || busy || disabled || setOver;
+  const blocked = loading || busy || disabled || setOver || paused;
 
   /** Game point / deuce / set won banner. */
   const statusBanner = (className = '') => {
@@ -288,50 +199,29 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
     onPoint(keyAt(end));
   };
 
-  /** Top-down court. `big` = full-screen arena sizes. */
+  /** Top-down court (`big` = full-screen arena sizes), greyed out with a banner while paused. */
   const courtBoard = (big: boolean) => (
-    <div
-      className={`relative w-full aspect-[2/1] rounded-lg overflow-hidden [container-type:inline-size] bg-gradient-to-br from-emerald-600 to-emerald-800 ring-2 ring-white/80 ${
-        big ? 'shadow-[0_0_60px_-10px_rgba(52,211,153,0.6)]' : 'shadow-inner'
-      }`}
-    >
-      {/* Court lines */}
-      <svg viewBox="0 0 100 50" preserveAspectRatio="none" className="absolute inset-0 w-full h-full" aria-hidden="true">
-        <g stroke="rgba(255,255,255,0.85)" strokeWidth="0.45" vectorEffect="non-scaling-stroke" fill="none">
-          <line x1="0" y1={Y.singles / 2} x2="100" y2={Y.singles / 2} />
-          <line x1="0" y1={50 - Y.singles / 2} x2="100" y2={50 - Y.singles / 2} />
-          <line x1={X.longService} y1="0" x2={X.longService} y2="50" />
-          <line x1={100 - X.longService} y1="0" x2={100 - X.longService} y2="50" />
-          <line x1={X.shortService} y1="0" x2={X.shortService} y2="50" />
-          <line x1={100 - X.shortService} y1="0" x2={100 - X.shortService} y2="50" />
-          <line x1="0" y1="25" x2={X.shortService} y2="25" />
-          <line x1={100 - X.shortService} y1="25" x2="100" y2="25" />
-        </g>
-      </svg>
-
-      {/* Players in their service courts */}
-      {(['left', 'right'] as End[]).flatMap(end => [serviceCourt(end, true), serviceCourt(end, false)])}
-
-      {/* Scores in the front court */}
-      {(['left', 'right'] as End[]).map(end => (
-        <div key={end} className="absolute flex items-center justify-center pointer-events-none" style={frontStyle(end)}>
-          <span
-            key={score(keyAt(end))}
-            // Sized to the court width so two digits always fit between the service line and the net
-            style={{ fontSize: '8cqw' }}
-            className={`font-black leading-none tracking-tighter tabular-nums drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)] animate-score-pop ${
-              keyAt(end) === server ? 'text-lime-300' : 'text-white'
-            }`}
+    <div className="relative">
+      <CourtDiagram match={match} big={big} dimmed={paused} />
+      {paused && (
+        <div className="absolute inset-0 flex items-center justify-center p-2">
+          <button
+            type="button"
+            onClick={onResume}
+            disabled={!onResume}
+            className="flex flex-col items-center gap-1 rounded-2xl bg-slate-950/85 ring-2 ring-amber-300 px-4 py-2.5 text-center shadow-xl"
           >
-            {score(keyAt(end))}
-          </span>
+            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-black uppercase tracking-widest text-amber-300">
+              <Pause className="w-4 h-4" /> Paused · {pausedLabel}
+            </span>
+            {onResume && (
+              <span className="flex items-center gap-1 text-[11px] font-bold text-white">
+                <Play className="w-3.5 h-3.5" /> Tap to resume
+              </span>
+            )}
+          </button>
         </div>
-      ))}
-
-      {/* Net with posts */}
-      <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1.5 bg-gradient-to-b from-slate-100 via-white to-slate-100 shadow-[0_0_8px_rgba(0,0,0,0.4)]" aria-hidden="true" />
-      <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-slate-200 ring-2 ring-slate-500" aria-hidden="true" />
-      <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-slate-200 ring-2 ring-slate-500" aria-hidden="true" />
+      )}
     </div>
   );
 
@@ -353,25 +243,44 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
       </span>
     ));
 
-  /** Normal panel +1 button. */
+  /** "Moment" button under a team's +1 (a smash, a drop …). */
+  const momentButton = (key: Key, className: string) =>
+    onMoment && (
+      <button
+        type="button"
+        onClick={() => onMoment(key)}
+        disabled={loading}
+        aria-label={`Capture a moment for ${match[key].name}`}
+        className={`flex items-center justify-center gap-1.5 rounded-xl font-bold transition active:scale-95 disabled:opacity-50 select-none touch-manipulation ${className}`}
+      >
+        <Sparkles className="w-4 h-4 flex-shrink-0" /> Moment
+      </button>
+    );
+
+  /** Normal panel +1 button, with the Moment button under it. */
   const panelPointButton = (end: End) => {
     const key = keyAt(end);
     return (
-      <button
-        key={end}
-        onClick={() => point(end)}
-        disabled={blocked}
-        className={`relative min-w-0 rounded-xl py-4 px-2 font-extrabold text-lg transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed select-none flex flex-col items-center justify-center leading-tight ${
-          end === 'left' ? 'bg-sky-500 hover:bg-sky-600 text-white ls:col-start-1' : 'bg-amber-400 hover:bg-amber-500 text-slate-900 ls:col-start-3'
-        } ls:row-start-1`}
-      >
-        <span className="flex items-center gap-2">
-          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-          +1 Point
-        </span>
-        <span className="mt-0.5 text-[11px] font-semibold opacity-85 truncate max-w-full ls:whitespace-normal ls:break-words">{match[key].name}</span>
-        {popsFor(end)}
-      </button>
+      <div key={end} className={`min-w-0 flex flex-col gap-2 ls:row-start-1 ${end === 'left' ? 'ls:col-start-1' : 'ls:col-start-3'}`}>
+        <button
+          onClick={() => point(end)}
+          disabled={blocked}
+          className={`relative flex-1 min-w-0 rounded-xl py-4 px-2 font-extrabold text-lg transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed select-none flex flex-col items-center justify-center leading-tight ${
+            end === 'left' ? 'bg-sky-500 hover:bg-sky-600 text-white' : 'bg-amber-400 hover:bg-amber-500 text-slate-900'
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+            +1 Point
+          </span>
+          <span className="mt-0.5 text-[11px] font-semibold opacity-85 truncate max-w-full ls:whitespace-normal ls:break-words">{match[key].name}</span>
+          {popsFor(end)}
+        </button>
+        {momentButton(
+          key,
+          `py-2.5 text-sm ring-1 ${end === 'left' ? 'bg-sky-500/15 text-sky-200 ring-sky-400/40 hover:bg-sky-500/25' : 'bg-amber-400/15 text-amber-200 ring-amber-300/40 hover:bg-amber-400/25'}`
+        )}
+      </div>
     );
   };
 
@@ -381,8 +290,8 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
     const serving = key === server;
     const left = end === 'left';
     return (
+      <div key={end} className="min-w-0 min-h-0 flex flex-col gap-2 landscape:w-[18%] landscape:max-w-[13rem] landscape:h-full portrait:flex-1">
       <button
-        key={end}
         onClick={() => point(end)}
         disabled={blocked}
         aria-label={`Point to ${match[key].name}`}
@@ -390,7 +299,7 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
           left
             ? 'bg-gradient-to-b from-sky-400 to-blue-600 border-blue-800 text-white shadow-[0_0_40px_-6px_rgba(56,189,248,0.75)]'
             : 'bg-gradient-to-b from-amber-300 to-orange-500 border-orange-700 text-slate-900 shadow-[0_0_40px_-6px_rgba(251,191,36,0.75)]'
-        } landscape:w-[18%] landscape:max-w-[13rem] landscape:h-full portrait:flex-1`}
+        } flex-1 w-full`}
       >
         <span className="absolute inset-x-0 top-0 h-1/2 bg-white/15 rounded-t-3xl pointer-events-none" aria-hidden="true" />
         {serving && (
@@ -406,6 +315,8 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
         <span className="text-xs font-bold leading-tight text-center break-words opacity-90 max-w-full">{match[key].name}</span>
         {popsFor(end)}
       </button>
+      {momentButton(key, `h-14 flex-shrink-0 text-base ring-1 ${left ? 'bg-sky-500/20 text-sky-100 ring-sky-400/50' : 'bg-amber-400/20 text-amber-100 ring-amber-300/50'}`)}
+      </div>
     );
   };
 
@@ -496,10 +407,20 @@ export const RefereeCourt: React.FC<Props> = ({ match, disabled, loading, onPoin
 
       {/* Match controls: Undo · End set · Finish match */}
       {live && (
-        <div className="relative mt-2 grid grid-cols-3 gap-2 sm:gap-3">
-          <button onClick={onUndo} disabled={!onUndo || loading || busy} className={`${barBtn} bg-yellow-400 border-yellow-600 text-slate-900`}>
+        <div className={`relative mt-2 grid gap-2 sm:gap-3 ${onPause || onResume ? 'grid-cols-4' : 'grid-cols-3'}`}>
+          <button onClick={onUndo} disabled={!onUndo || loading || busy || paused} className={`${barBtn} bg-yellow-400 border-yellow-600 text-slate-900`}>
             <Undo2 className="w-4 h-4" /> Undo
           </button>
+          {(onPause || onResume) &&
+            (paused ? (
+              <button onClick={onResume} disabled={!onResume || loading} className={`${barBtn} bg-emerald-500 border-emerald-700 text-white`}>
+                <Play className="w-4 h-4" /> Resume
+              </button>
+            ) : (
+              <button onClick={onPause} disabled={!onPause || loading} className={`${barBtn} bg-slate-200 border-slate-400 text-slate-900`}>
+                <Pause className="w-4 h-4" /> Pause
+              </button>
+            ))}
           <button onClick={onEndSet} disabled={!onEndSet || loading || busy || disabled} className={`${barBtn} bg-orange-500 border-orange-700 text-white`}>
             <Flag className="w-4 h-4" /> End set
           </button>

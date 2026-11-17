@@ -5,6 +5,7 @@ import { Calendar, Plus, Trash2, Loader2, ClipboardEdit } from 'lucide-react';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ResultEditor } from './ResultEditor';
 import { KnockoutPanel } from './KnockoutPanel';
+import { UnassignedMatches } from './UnassignedMatches';
 import { sortGroups, sortPools, sortByName, standingIdOf, matchLabel, isKnockout, getKnockout, pointsPerSetOf, knockoutName } from '../utils/calculations';
 import { confirmDialog, notify, notifyError } from './Dialog';
 
@@ -169,6 +170,8 @@ export const MatchScheduler: React.FC = () => {
           Match Scheduler
         </h2>
       </div>
+
+      <UnassignedMatches />
 
       <KnockoutPanel />
 

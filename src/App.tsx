@@ -4,6 +4,7 @@ import { Dashboard } from './pages/Dashboard';
 import { HomePage } from './pages/HomePage';
 import { RefereePanel } from './pages/RefereePanel';
 import { LiveView } from './pages/LiveView';
+import { MatchDetail } from './pages/MatchDetail';
 import { Predictions } from './pages/Predictions';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -25,7 +26,7 @@ function App() {
 
   // Show full-screen loader during initial data fetch
   if (isLoading && !isInitialized) {
-    return <LoadingSpinner fullScreen size="xl" text="Loading Tournament Data..." />;
+    return <LoadingSpinner fullScreen size="xl" text="Loading League Data..." />;
   }
 
   return (
@@ -54,6 +55,7 @@ function App() {
           } 
         />
         <Route path="/live" element={<LiveView />} />
+        <Route path="/live/match/:matchId" element={<MatchDetail />} />
         <Route path="/predict" element={<Predictions />} />
         {/* Bracket is a tab of the live page now; keep the old address working */}
         <Route path="/live/bracket" element={<Navigate to="/live?tab=bracket" replace />} />

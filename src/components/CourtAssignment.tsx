@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTournamentStore } from '../store/tournamentStore';
 import { UserCog, MapPin, ChevronUp, ChevronDown, X, Plus, Edit2, Trash2, Check, Loader2 } from 'lucide-react';
 import { LoadingSpinner } from './LoadingSpinner';
+import { UnassignedMatches } from './UnassignedMatches';
 import { sortByName } from '../utils/calculations';
 import { confirmDialog, notifyError } from './Dialog';
 
@@ -140,6 +141,8 @@ export const CourtAssignment: React.FC = () => {
           {courtNameForm('Court name, e.g. Court 3')}
         </div>
       )}
+
+      <UnassignedMatches />
 
       {/* Referees List */}
       <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gray-50 rounded-lg">

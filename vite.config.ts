@@ -22,7 +22,12 @@ export default defineConfig(({ mode }) => {
     server: {
       host: true,
       port: 3000,
-      open: true
+      open: true,
+      // Let ngrok tunnels reach the dev server (e.g. testing on a phone): any *.ngrok-free.app / *.ngrok.app address
+      allowedHosts: ['.ngrok-free.app', '.ngrok.app']
+    },
+    preview: {
+      allowedHosts: ['.ngrok-free.app', '.ngrok.app']
     }
   }
 })

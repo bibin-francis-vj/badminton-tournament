@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ChevronDown, Crown, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, Crown, RefreshCw, Share2, GitBranch, Trophy, Clock, ListOrdered, LayoutGrid, CheckCircle2, Info, X, Hand } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
 import { getStandings, standingIdOf, matchLabel, sortStanding, standingHasPoolMatches, sortGroups, sortByName, setDiffOf, pointDiffOf, signed } from '../utils/calculations';
 import type { Court, Match, Standing, Team } from '../types';
@@ -91,7 +91,13 @@ const usePointHits = (match: Match) => {
 };
 
 /** Big scoreboard for the match currently live on a court. */
-const LiveCourtCard: React.FC<{ court: Court; match: Match; label: string }> = ({ court, match, label }) => {
+const LiveCourtCard: React.FC<{ court: Court; match: Match; label: string; highlight?: boolean; onOpen?: () => void }> = ({
+  court,
+  match,
+  label,
+  highlight = false,
+  onOpen
+}) => {
   const current = match.sets.find(s => s.setNumber === match.currentSetNumber);
   const finishedSets = match.sets.filter(s => s.winner && s.setNumber !== match.currentSetNumber);
   const hits = usePointHits(match);
@@ -144,7 +150,20 @@ const LiveCourtCard: React.FC<{ court: Court; match: Match; label: string }> = (
   };
 
   return (
-    <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-indigo-900 text-white shadow-lg ring-1 ring-white/10 overflow-hidden">
+    <div className="relative">
+    {/* Ripple rings while the "tap a live match" tip is new */}
+    {highlight && (
+      <>
+        <span className="pointer-events-none absolute inset-0 rounded-2xl ring-4 ring-lime-300 animate-live-ripple" aria-hidden="true" />
+        <span className="pointer-events-none absolute inset-0 rounded-2xl ring-4 ring-lime-300 animate-live-ripple [animation-delay:0.9s]" aria-hidden="true" />
+      </>
+    )}
+    <Link
+      to={`/live/match/${match.id}`}
+      onClick={onOpen}
+      aria-label={`${match.team1.name} vs ${match.team2.name}: court view and commentary`}
+      className={`relative block rounded-2xl ${highlight ? 'ring-2 !ring-lime-300' : ''} bg-gradient-to-br from-slate-900 via-indigo-950 to-indigo-900 text-white shadow-lg ring-1 ring-white/10 overflow-hidden transition hover:ring-lime-300/60 active:scale-[0.99]`}
+    >
       <div className="flex items-center justify-between gap-2 px-4 pt-3">
         <div className="min-w-0">
           <div className="text-sm font-extrabold tracking-wide">{court.name}</div>
@@ -159,15 +178,17 @@ const LiveCourtCard: React.FC<{ court: Court; match: Match; label: string }> = (
         {row('team2')}
       </div>
       <div className="flex items-center justify-between gap-2 px-4 py-2 bg-black/20 text-[11px] text-indigo-200">
-        <span>
+        <span className="truncate">
           Set {match.currentSetNumber} · Sets {match.score.team1}–{match.score.team2}
+          {match.pendingApproval
+            ? <span className="font-semibold text-orange-300"> · Awaiting approval</span>
+            : court.refereeName && court.refereeName !== 'Unassigned' && <span> · Ref: {court.refereeName}</span>}
         </span>
-        {match.pendingApproval ? (
-          <span className="font-semibold text-orange-300">Awaiting approval</span>
-        ) : (
-          court.refereeName && court.refereeName !== 'Unassigned' && <span className="truncate">Ref: {court.refereeName}</span>
-        )}
+        <span className="flex-shrink-0 inline-flex items-center gap-1 font-bold text-lime-300">
+          Court view & commentary <ChevronRight className="w-3.5 h-3.5" />
+        </span>
       </div>
+    </Link>
     </div>
   );
 };
@@ -189,8 +210,9 @@ const CourtMatchRow: React.FC<{ match: Match; label: string; first?: boolean }> 
   const done = match.status === 'completed';
   const live = match.status === 'live';
   const won = (key: 'team1' | 'team2') => done && match.winner?.id === match[key].id;
-  return (
-    <div className={`flex items-center gap-3 ${first ? '' : 'pt-2.5 mt-2.5 border-t border-slate-100'} ${done ? 'opacity-80' : ''}`}>
+  const rowClass = `flex items-center gap-3 ${first ? '' : 'pt-2.5 mt-2.5 border-t border-slate-100'} ${done ? 'opacity-80' : ''}`;
+  const body = (
+    <>
       <div className="w-14 flex-shrink-0 text-center text-sm font-black text-slate-900 leading-tight">{match.scheduledTime ?? '—'}</div>
       <div className="min-w-0 flex-1">
         <div className="text-[11px] font-semibold text-indigo-700 truncate">{label}</div>
@@ -218,7 +240,16 @@ const CourtMatchRow: React.FC<{ match: Match; label: string; first?: boolean }> 
           <span className="text-[10px] font-bold text-orange-600">APPROVAL</span>
         ) : null}
       </div>
-    </div>
+      {(done || live) && <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0 -ml-1" />}
+    </>
+  );
+  // Played and live matches open their court view and commentary
+  return done || live ? (
+    <Link to={`/live/match/${match.id}`} className={`${rowClass} hover:bg-slate-50 -mx-2 px-2 rounded-lg`}>
+      {body}
+    </Link>
+  ) : (
+    <div className={rowClass}>{body}</div>
   );
 };
 
@@ -227,10 +258,68 @@ const CourtsTab: React.FC = () => {
   const sortedCourts = sortByName(courts);
   // Courts whose full match list is open
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  // One-time tip for the match detail view (remembered on this device once dismissed or used)
+  const [tipSeen, setTipSeen] = useState(() => {
+    try {
+      return localStorage.getItem('live.detailTip') === 'seen';
+    } catch {
+      return false;
+    }
+  });
+  const dismissTip = () => {
+    setTipSeen(true);
+    try {
+      localStorage.setItem('live.detailTip', 'seen');
+    } catch {
+      /* storage blocked: hidden for this visit */
+    }
+  };
+  const anyLive = matches.some(m => m.status === 'live' && m.courtId && courts.some(c => c.id === m.courtId));
+  const showTip = anyLive && !tipSeen;
+  // The tip closes itself after a while (counts as seen)
+  const TIP_MS = 18000;
+  useEffect(() => {
+    if (!showTip) return;
+    const t = window.setTimeout(dismissTip, TIP_MS);
+    return () => window.clearTimeout(t);
+  }, [showTip]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (sortedCourts.length === 0) return <EmptyState text="No courts have been set up yet." />;
 
   return (
+    <>
+    {showTip && (
+      <div
+        role="status"
+        className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pointer-events-none"
+      >
+        <div className="pointer-events-auto relative overflow-hidden w-full max-w-md rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-500 text-white shadow-xl ring-1 ring-white/30 p-4 flex items-start gap-3 animate-fade-up">
+          {/* Shrinking bar: time until the tip closes by itself */}
+          <span
+            className="absolute inset-x-0 bottom-0 h-1 bg-lime-300/80 origin-left"
+            style={{ animation: `tipTimer ${TIP_MS}ms linear forwards` }}
+            aria-hidden="true"
+          />
+          <span className="w-10 h-10 flex-shrink-0 rounded-xl bg-lime-300 text-slate-900 flex items-center justify-center">
+            <Hand className="w-5 h-5 animate-bounce" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-extrabold">
+              New: watch a match live <span className="ml-1 rounded bg-lime-300 px-1.5 py-0.5 text-[10px] font-black text-slate-900 align-middle">NEW</span>
+            </div>
+            <p className="mt-0.5 text-xs text-indigo-100 leading-snug">
+              Tap a highlighted live match to see the court, where each player stands, shot replays and live commentary.
+            </p>
+            <button onClick={dismissTip} className="mt-2.5 rounded-lg bg-lime-300 text-slate-900 hover:bg-lime-200 px-3 py-1.5 text-xs font-extrabold transition">
+              Got it
+            </button>
+          </div>
+          <button onClick={dismissTip} aria-label="Close tip" className="p-1 -m-1 rounded-lg text-indigo-200 hover:text-white hover:bg-white/10">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    )}
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {sortedCourts.map(court => {
         const live = matches.find(m => m.courtId === court.id && m.status === 'live');
@@ -247,7 +336,7 @@ const CourtsTab: React.FC = () => {
         return (
           <section key={court.id} className="space-y-2">
             {live ? (
-              <LiveCourtCard court={court} match={live} label={matchLabel(live, groups, pools)} />
+              <LiveCourtCard court={court} match={live} label={matchLabel(live, groups, pools)} highlight={showTip} onOpen={dismissTip} />
             ) : (
               <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 flex items-center justify-between gap-3">
                 <div>
@@ -289,6 +378,7 @@ const CourtsTab: React.FC = () => {
         );
       })}
     </div>
+    </>
   );
 };
 
@@ -548,7 +638,7 @@ export const LiveScoreboard: React.FC = () => {
     const url = window.location.href;
     if (navigator.share) {
       try {
-        await navigator.share({ title: 'Cubet Badminton Tournament – Live Scores', text: 'Follow the live scores!', url });
+        await navigator.share({ title: 'Cubet Badminton League – Live Scores', text: 'Follow the live scores!', url });
       } catch {
         /* share sheet dismissed */
       }

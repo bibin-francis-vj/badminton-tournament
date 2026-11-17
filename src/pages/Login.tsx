@@ -87,7 +87,7 @@ export default function Login() {
               <circle cx="32" cy="44" r="12" fill="currentColor" />
             </svg>
           </span>
-          <span className="mt-3 text-white text-xl font-black tracking-tight">Cubet Badminton Tournament</span>
+          <span className="mt-3 text-white text-xl font-black tracking-tight">Cubet Badminton League</span>
           <span className="text-lime-300 text-xs font-bold uppercase tracking-widest">Season 2</span>
         </Link>
 

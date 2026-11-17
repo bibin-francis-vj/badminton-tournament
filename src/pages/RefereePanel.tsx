@@ -1,12 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserCheck, LogOut, Trophy, Clock, MapPin, Loader2 } from 'lucide-react';
+import { UserCheck, LogOut, Trophy, Clock, MapPin, Loader2, Pause, Play, MessageSquarePlus, Radio } from 'lucide-react';
 import { useTournamentStore } from '../store/tournamentStore';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { matchLabel, setRuleFor, setWinnerOf } from '../utils/calculations';
 import type { Match, Court } from '../types';
 import { confirmDialog, notify, notifyError } from '../components/Dialog';
 import { RefereeCourt } from '../components/RefereeCourt';
+import { MomentDialog, NoteDialog, PauseDialog, type MomentInput } from '../components/MatchEventDialogs';
+import { CommentaryFeed } from '../components/CommentaryFeed';
+import { addMatchEvent, buildCommentary, formatDuration, pauseReason, pauseStateOf, scoreSnapshot, useMatchEvents, type NewMatchEvent } from '../utils/matchEvents';
 
 export const RefereePanel: React.FC = () => {
   const navigate = useNavigate();
@@ -63,6 +66,78 @@ export const RefereePanel: React.FC = () => {
   // The live match on this court, read straight from the store so score and court update in the same render
   const currentMatch = courtId ? matches.find(m => m.courtId === courtId && m.status === 'live') ?? null : null;
 
+  // Commentary: pauses, moments and comments of the live match (points come from the match itself)
+  const { events, add: addEvent, remove: removeEvent } = useMatchEvents(currentMatch?.id);
+  const pause = pauseStateOf(events);
+  const [momentTeam, setMomentTeam] = useState<'team1' | 'team2' | null>(null);
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!pause) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [pause]);
+  const pausedLabel = pause ? pauseReason(pause.kind).label : null;
+
+  /** Save to the commentary; a failure is shown but never blocks scoring. */
+  const logEvent = async (matchId: string, event: NewMatchEvent) => {
+    try {
+      await addMatchEvent(matchId, { created_by: refereeName || null, ...event });
+    } catch (error) {
+      notifyError(error, 'Could not save this to the commentary.');
+    }
+  };
+
+  const saveMoment = async (m: MomentInput) => {
+    if (!currentMatch) return;
+    try {
+      await addEvent({
+        type: 'moment',
+        team: m.team,
+        player_id: m.playerId,
+        player_name: m.playerName,
+        kind: m.kind,
+        comment: m.comment || null,
+        path: m.path,
+        created_by: refereeName || null,
+        ...scoreSnapshot(currentMatch)
+      });
+    } catch (error) {
+      notifyError(error, 'Could not save the moment. Please try again.');
+      throw error;
+    }
+  };
+
+  const savePause = async (reason: string, comment: string) => {
+    if (!currentMatch) return;
+    try {
+      await addEvent({ type: 'pause', kind: reason, comment: comment || null, created_by: refereeName || null, ...scoreSnapshot(currentMatch) });
+    } catch (error) {
+      notifyError(error, 'Could not pause the match. Please try again.');
+      throw error;
+    }
+  };
+
+  const resumeMatch = async () => {
+    if (!currentMatch) return;
+    try {
+      await addEvent({ type: 'resume', created_by: refereeName || null, ...scoreSnapshot(currentMatch) });
+    } catch (error) {
+      notifyError(error, 'Could not resume the match. Please try again.');
+    }
+  };
+
+  const saveNote = async (comment: string) => {
+    if (!currentMatch) return;
+    try {
+      await addEvent({ type: 'note', comment, created_by: refereeName || null, ...scoreSnapshot(currentMatch) });
+    } catch (error) {
+      notifyError(error, 'Could not post the comment. Please try again.');
+      throw error;
+    }
+  };
+
   // When a set is won (e.g. 15-12, 16-14, 21-20 in a pool match), open the End set / End match window by itself.
   // Asked once per score, so Cancel keeps it closed until the score changes (e.g. after an undo).
   const promptedFor = useRef('');
@@ -87,7 +162,7 @@ export const RefereePanel: React.FC = () => {
 
   // Scores show instantly and save in the background, so the buttons are never blocked
   const handleScoreUpdate = async (team: 'team1' | 'team2') => {
-    if (currentMatch && currentMatch.status === 'live') {
+    if (currentMatch && currentMatch.status === 'live' && !pause) {
       try {
         await updateMatchScore(currentMatch.id, team, 1);
       } catch (error) {
@@ -118,6 +193,7 @@ export const RefereePanel: React.FC = () => {
         setLoading(true);
         try {
           await startMatch(targetMatchId);
+          await logEvent(targetMatchId, { type: 'start', ...scoreSnapshot(matchToStart) });
         } finally {
           setLoading(false);
         }
@@ -130,7 +206,12 @@ export const RefereePanel: React.FC = () => {
       if (await confirmDialog({ title: 'Finish match?', message: 'The team that has won more sets wins, and the match is marked as completed.', confirmText: 'Finish', tone: 'danger' })) {
         setLoading(true);
         try {
+          const snapshot = scoreSnapshot(currentMatch);
           await finishMatch(currentMatch.id);
+          const won = snapshot.sets_won;
+          if (won.team1 !== won.team2) {
+            await logEvent(currentMatch.id, { type: 'match_end', ...snapshot, team: won.team1 > won.team2 ? 'team1' : 'team2' });
+          }
         } catch (error) {
           notifyError(error, 'Failed to finish match');
         } finally {
@@ -163,7 +244,13 @@ export const RefereePanel: React.FC = () => {
 
     setLoading(true);
     try {
+      const snapshot = scoreSnapshot(currentMatch);
+      const setsWon = { ...snapshot.sets_won, [selectedWinner]: snapshot.sets_won[selectedWinner] + 1 };
       await endSet(currentMatch.id, selectedWinner);
+      await logEvent(currentMatch.id, { type: 'set_end', ...snapshot, sets_won: setsWon, team: selectedWinner });
+      if (setsWon[selectedWinner] >= 2) {
+        await logEvent(currentMatch.id, { type: 'match_end', ...snapshot, sets_won: setsWon, team: selectedWinner });
+      }
       setShowEndSetModal(false);
       setSelectedWinner(null);
     } catch (error) {
@@ -296,6 +383,28 @@ export const RefereePanel: React.FC = () => {
               )}
             </div>
 
+            {/* Paused: reason, how long, resume */}
+            {pause && (
+              <div className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-3 sm:p-4 flex items-center gap-3">
+                <span className="w-10 h-10 rounded-full bg-amber-400 text-slate-900 flex items-center justify-center flex-shrink-0">
+                  <Pause className="w-5 h-5" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-extrabold text-amber-900">
+                    Paused · {pauseReason(pause.kind).icon} {pausedLabel}
+                    <span className="ml-2 font-mono font-bold tabular-nums">{formatDuration(now - new Date(pause.at).getTime())}</span>
+                  </div>
+                  {pause.comment && <div className="text-sm text-amber-900/80 break-words">{pause.comment}</div>}
+                </div>
+                <button
+                  onClick={resumeMatch}
+                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 font-bold"
+                >
+                  <Play className="w-4 h-4" /> Resume
+                </button>
+              </div>
+            )}
+
             {/* Court (top view): ends, serve, +1 buttons, swap ends / change server */}
             <RefereeCourt
               match={currentMatch}
@@ -305,6 +414,10 @@ export const RefereePanel: React.FC = () => {
               onUndo={handleUndoScore}
               onEndSet={handleEndSet}
               onFinish={handleFinishMatch}
+              pausedLabel={pausedLabel}
+              onPause={() => setPauseOpen(true)}
+              onResume={resumeMatch}
+              onMoment={team => setMomentTeam(team)}
             />
 
             {/* Match Controls */}
@@ -313,7 +426,7 @@ export const RefereePanel: React.FC = () => {
                 <div className="grid grid-cols-3 gap-2 sm:gap-3">
                   <button
                     onClick={handleUndoScore}
-                    disabled={loading}
+                    disabled={loading || !!pause}
                     className="bg-yellow-500 text-white py-3 px-1 text-sm sm:text-base rounded-lg hover:bg-yellow-600 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2 min-h-[52px]"
                   >
                     {loading && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -337,6 +450,57 @@ export const RefereePanel: React.FC = () => {
                   </button>
                 </div>
                 
+                {/* Pause / resume and a free comment for the commentary */}
+                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                  {pause ? (
+                    <button
+                      onClick={resumeMatch}
+                      className="bg-emerald-600 text-white py-3 px-2 text-sm sm:text-base rounded-lg hover:bg-emerald-700 transition font-semibold flex items-center justify-center gap-2 min-h-[52px]"
+                    >
+                      <Play className="w-4 h-4" /> Resume match
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setPauseOpen(true)}
+                      className="bg-slate-700 text-white py-3 px-2 text-sm sm:text-base rounded-lg hover:bg-slate-800 transition font-semibold flex items-center justify-center gap-2 min-h-[52px]"
+                    >
+                      <Pause className="w-4 h-4" /> Pause match
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setNoteOpen(true)}
+                    className="bg-indigo-600 text-white py-3 px-2 text-sm sm:text-base rounded-lg hover:bg-indigo-700 transition font-semibold flex items-center justify-center gap-2 min-h-[52px]"
+                  >
+                    <MessageSquarePlus className="w-4 h-4" /> Add comment
+                  </button>
+                </div>
+
+                {/* Latest commentary (moments, pauses, comments); remove one added by mistake */}
+                <div className="rounded-xl border border-gray-200 p-3 sm:p-4">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                      <Radio className="w-4 h-4 text-red-500" /> Live commentary
+                    </h3>
+                    <a href={`/live/match/${currentMatch.id}`} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-600 hover:underline">
+                      See what viewers see ›
+                    </a>
+                  </div>
+                  <CommentaryFeed
+                    items={buildCommentary(currentMatch, events)}
+                    limit={5}
+                    emptyText="Moments, pauses and comments you add show here, and live for everyone watching."
+                    onRemove={async item => {
+                      if (item.eventId && (await confirmDialog({ title: 'Remove from commentary?', message: item.title, confirmText: 'Remove', tone: 'danger' }))) {
+                        try {
+                          await removeEvent(item.eventId);
+                        } catch (error) {
+                          notifyError(error, 'Could not remove it. Please try again.');
+                        }
+                      }
+                    }}
+                  />
+                </div>
+
                 {/* Set Locked Message */}
                 {currentMatch.sets?.find(s => s.setNumber === currentMatch.currentSetNumber)?.locked && (
                   <div className="bg-orange-50 border border-orange-300 rounded-lg p-3 text-center">
@@ -559,6 +723,13 @@ export const RefereePanel: React.FC = () => {
           );
         })()}
       </div>
+
+      {/* Commentary dialogs */}
+      {currentMatch && momentTeam && (
+        <MomentDialog match={currentMatch} team={momentTeam} onClose={() => setMomentTeam(null)} onSave={saveMoment} />
+      )}
+      {currentMatch && pauseOpen && <PauseDialog onClose={() => setPauseOpen(false)} onSave={savePause} />}
+      {currentMatch && noteOpen && <NoteDialog onClose={() => setNoteOpen(false)} onSave={saveNote} />}
 
       {/* End Set Modal (End match when this set decides the match) */}
       {showEndSetModal && currentMatch && (() => {
